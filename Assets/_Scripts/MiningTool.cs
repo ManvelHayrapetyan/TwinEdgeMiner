@@ -42,8 +42,8 @@ public class MiningTool : MonoBehaviour
         {
             if (hit.collider.TryGetComponent<IMineable>(out var mineable))
             {
-                mineable.ApplyDurabilityDamage(destructionDamage);
                 mineable.ApplyStabilityDamage(stabilityDamage);
+                mineable.ApplyDurabilityDamage(destructionDamage);
                 Debug.Log($"{nameof(destructionDamage)} = {destructionDamage}");
                 Debug.Log($"{nameof(stabilityDamage)} = {stabilityDamage}");
             }

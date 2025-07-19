@@ -12,9 +12,30 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2c8161838ce53f744b1765b81c15deb4, type: 3}
   m_Name: UpgradeSO
   m_EditorClassIdentifier: 
-  _playerStaminaBonusPerLevel: 
-  _playerInventoryBonusPerLevel: 
-  _miningToolSpeedBonusPerLevel: []
-  _miningToolDestructionDamageBonusPerLevel: []
-  _miningToolStabilityDamageBonusPerLevel: []
-  _upgradeCostPerLevel: []
+  _maxUpgradeLevel: 5
+  _playerStaminaBonusPerLevel: 32000000320000006400000064000000c8000000
+  _playerInventoryBonusPerLevel: 0100000001000000020000000200000003000000
+  _miningToolSpeedBonusPerLevel:
+  - 0.25
+  - 0.25
+  - 0.5
+  - 0.5
+  - 1
+  _miningToolDestructionDamageBonusPerLevel:
+  - 5
+  - 5
+  - 10
+  - 10
+  - 20
+  _miningToolStabilityDamageBonusPerLevel:
+  - 5
+  - 5
+  - 10
+  - 10
+  - 20
+  _upgradeCostPerLevel:
+  - 10
+  - 20
+  - 50
+  - 100
+  - 250
