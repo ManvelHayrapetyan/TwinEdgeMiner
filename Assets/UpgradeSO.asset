@@ -33,9 +33,4 @@ MonoBehaviour:
   - 10
   - 10
   - 20
-  _upgradeCostPerLevel:
-  - 10
-  - 20
-  - 50
-  - 100
-  - 250
+  _upgradeCostPerLevel: 0a000000140000003200000064000000fa000000

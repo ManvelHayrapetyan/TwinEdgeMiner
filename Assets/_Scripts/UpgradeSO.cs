@@ -10,7 +10,7 @@ public class UpgradeSO : ScriptableObject
     public IReadOnlyList<float> MiningToolSpeedBonusPerLevel => _miningToolSpeedBonusPerLevel;
     public IReadOnlyList<float> MiningToolDestructionDamageBonusPerLevel => _miningToolDestructionDamageBonusPerLevel;
     public IReadOnlyList<float> MiningToolStabilityDamageBonusPerLevel => _miningToolStabilityDamageBonusPerLevel;
-    public IReadOnlyList<float> UpgradeCostPerLevel => _upgradeCostPerLevel;
+    public IReadOnlyList<int> UpgradeCostPerLevel => _upgradeCostPerLevel;
 
     [SerializeField, Min(1)] private int _maxUpgradeLevel = 10;
     [SerializeField] private List<int> _playerStaminaBonusPerLevel = new List<int>();
@@ -18,7 +18,7 @@ public class UpgradeSO : ScriptableObject
     [SerializeField] private List<float> _miningToolSpeedBonusPerLevel = new List<float>();
     [SerializeField] private List<float> _miningToolDestructionDamageBonusPerLevel = new List<float>();
     [SerializeField] private List<float> _miningToolStabilityDamageBonusPerLevel = new List<float>();
-    [SerializeField] private List<float> _upgradeCostPerLevel = new List<float>();
+    [SerializeField] private List<int> _upgradeCostPerLevel = new List<int>();
 
     private void OnValidate()
     {

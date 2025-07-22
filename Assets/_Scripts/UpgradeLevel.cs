@@ -1,5 +1,6 @@
 using UnityEngine;
 
+[System.Serializable]
 public class UpgradeLevel
 {
     public int PlayerStaminaLevel => _playerStaminaLevel;
@@ -8,10 +9,9 @@ public class UpgradeLevel
     public int MiningToolDestructionDamageLevel => _miningToolDestructionDamageLevel;
     public int MiningToolStabilityDamageLevel => _miningToolStabilityDamageLevel;
 
-    [SerializeField] private int _playerStaminaLevel = new();
-    [SerializeField] private int _playerInventoryLevel = new();
-    [SerializeField] private int _miningToolSpeedLevel = new();
-    [SerializeField] private int _miningToolDestructionDamageLevel = new();
-    [SerializeField] private int _miningToolStabilityDamageLevel = new();
-
+    [SerializeField] private int _playerStaminaLevel;
+    [SerializeField] private int _playerInventoryLevel;
+    [SerializeField] private int _miningToolSpeedLevel;
+    [SerializeField] private int _miningToolDestructionDamageLevel;
+    [SerializeField] private int _miningToolStabilityDamageLevel;
 }

@@ -1,4 +1,4 @@
-public interface IMineable
+public interface IMinable
 {
     float Stability { get; }
     float Durability { get; }

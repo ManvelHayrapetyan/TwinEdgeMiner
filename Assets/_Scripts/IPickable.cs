@@ -1,4 +1,4 @@
 public interface IPickable
 {
-    public void TryPick();
+    public void TryPick(Inventory inventory);
 }

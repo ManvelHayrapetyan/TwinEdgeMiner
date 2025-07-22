@@ -4,14 +4,11 @@ using Zenject;
 
 public class MiningTool : MonoBehaviour
 {
+    [Inject] private readonly LookAtTargetDetector _lookAtTargetDetector;
     [Inject] private readonly InputActions _inputActions;
+    [Inject] private readonly PlayerAndToolStats _stats;
 
-    [SerializeField] private float _range = 3f;
-    [SerializeField] private float _destructionDamage = 5f; // LMB
-    [SerializeField] private float _stabilityDamage = 10f; // RMB
     [SerializeField] private float _secondaryDamagePercent = 20f;
-    [SerializeField] private Camera _camera;
-
 
     private void OnEnable()
     {
@@ -27,20 +24,19 @@ public class MiningTool : MonoBehaviour
 
     private void OnLMB(InputAction.CallbackContext ctx)
     {
-        TryMine(_destructionDamage, _destructionDamage * _secondaryDamagePercent / 100);
+        TryMine(_stats.MiningToolDestructionDamage, _stats.MiningToolDestructionDamage * _secondaryDamagePercent / 100);
     }
 
     private void OnRMB(InputAction.CallbackContext ctx)
     {
-        TryMine(_stabilityDamage * _secondaryDamagePercent / 100, _stabilityDamage);
+        TryMine(_stats.MiningToolStabilityDamage * _secondaryDamagePercent / 100, _stats.MiningToolStabilityDamage);
     }
 
     private void TryMine(float destructionDamage, float stabilityDamage)
     {
-        Ray ray = _camera.ViewportPointToRay(new Vector3(0.5f, 0.5f));
-        if (Physics.Raycast(ray, out RaycastHit hit, _range))
+        if (_lookAtTargetDetector.TryRaycast(out RaycastHit hit))
         {
-            if (hit.collider.TryGetComponent<IMineable>(out var mineable))
+            if (hit.collider.TryGetComponent<IMinable>(out var mineable))
             {
                 mineable.ApplyStabilityDamage(stabilityDamage);
                 mineable.ApplyDurabilityDamage(destructionDamage);
