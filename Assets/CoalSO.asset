@@ -13,5 +13,6 @@ MonoBehaviour:
   m_Name: CoalSO
   m_EditorClassIdentifier: 
   _icon: {fileID: 0}
+  _id: Coal
   _itemName: Coal
   _basePrice: 5
