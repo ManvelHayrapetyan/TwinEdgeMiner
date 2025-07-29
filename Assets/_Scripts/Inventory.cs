@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using Zenject;
 using static UnityEditor.Progress;
@@ -7,6 +8,7 @@ using static UnityEditor.Progress;
 [System.Serializable]
 public class Inventory
 {
+
     public int InventorySize => _inventorySize;
     public int InventoryItemCount => _inventoryIDs != null ? _inventoryIDs.Count : 0;
 
@@ -26,6 +28,11 @@ public class Inventory
     {
         _itemDataBaseSO = itemDataBaseSO;
     }
+
+    public void UpgradeInventorySize(int inventorySize)
+    {
+        _inventorySize = inventorySize;
+    }
     public bool TryAddItem(ItemSO item)
     {
         if (_inventory.Count < _inventorySize)
@@ -43,12 +50,12 @@ public class Inventory
         _inventoryIDs?.Clear();
     }
 
-    public int SellAllOre()
+    public int SellAllItems()
     {
         int sellPrice = 0;
-        foreach (ItemSO ore in _inventory)
+        foreach (ItemSO item in _inventory)
         {
-            sellPrice += ore.BasePrice;
+            sellPrice += item.BasePrice;
         }
         _inventory?.Clear();
         _inventoryIDs?.Clear();
@@ -70,5 +77,10 @@ public class Inventory
         {
             _inventory.Add(_itemDataBaseSO.GetItemById(id));
         }
+    }
+    public IEnumerable<(ItemSO item, int count)> GetGroupedItems()
+    {
+        return _inventory.GroupBy(item => item.ID)
+                     .Select(g => (item: g.First(), count: g.Count()));
     }
 }

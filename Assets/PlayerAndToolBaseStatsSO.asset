@@ -17,3 +17,4 @@ MonoBehaviour:
   _miningToolSpeedBase: 1
   _miningToolDestructionDamageBase: 10
   _miningToolStabilityDamageBase: 10
+  _miningToolRadiusBase: 1

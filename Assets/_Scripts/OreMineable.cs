@@ -1,22 +1,17 @@
 using Unity.VisualScripting;
-using UnityEditorInternal.Profiling.Memory.Experimental;
 using UnityEngine;
-using UnityEngine.Playables;
 using Zenject;
 
 [RequireComponent(typeof(Rigidbody))]
 public class OreMineable : MonoBehaviour, IMinable, IPickable
 {
-    public float Stability => _stability;
-    public float Durability => _durability;
-
-    [Inject] private readonly SignalBus _signalBus;
-
+    [SerializeField] private OreMeshShow _oreMeshShowTest;
     [SerializeField] private float _maxStability = 100;
     [SerializeField] private float _maxDurability = 100;
     [SerializeField] private int _stagesToDestroy = 3;
     [SerializeField] private ItemSO _itemSO;
 
+    private int _maxStagesToDestroy;
     private float _stability;
     private float _durability;
     private Rigidbody _rb;
@@ -28,32 +23,36 @@ public class OreMineable : MonoBehaviour, IMinable, IPickable
         _rb.isKinematic = true;
         _stability = _maxStability;
         _durability = _maxDurability;
+        _maxStagesToDestroy = _stagesToDestroy;
     }
     public void ApplyStabilityDamage(float stabilityDamage)
     {
-        Debug.Log($"{_stability}  R  {stabilityDamage}");
-        _stability -= stabilityDamage;
-        _stability = Mathf.Max(0, _stability);
-        Debug.Log($"{_stability}  R  {_durability}");
+        _stability = Mathf.Clamp(_stability - stabilityDamage, 0, _maxStability);
     }
 
-    public void ApplyDurabilityDamage(float durabilityDamage)
+    public void ApplyDurabilityDamage(float durabilityDamage, Vector3 hitPoint, Vector3 hitDirection)
     {
         // stability cute damage to object, for best DPS need first decrease stability
-        _durability -= durabilityDamage * (_maxStability - _stability) / _maxStability;
-        Debug.Log($"{_durability}  R  {durabilityDamage}");
-        Debug.Log($"{_stability}  L  {_durability}");
+        if (_stability == 0)
+            _durability = Mathf.Clamp(_durability - durabilityDamage, 0, _maxDurability);
+        else
+            _durability = Mathf.Clamp(_durability - durabilityDamage *
+                (_maxStability - _stability) / _maxStability,
+                0, _maxDurability);
+
         if (_durability <= 0f)
         {
             _stability = _maxStability;
             _durability = _maxDurability;
             _stagesToDestroy -= 1;
             // here call or create event who destroy part of mesh
+            _oreMeshShowTest.BreakVoxelShellLayer(hitPoint, hitDirection, _maxStagesToDestroy);
         }
         if (_stagesToDestroy <= 0)
         {
             Debug.Log('a');
             //here full delete mesh of ground around ore and apply gravity for ore to drop a ground
+            Destroy(_oreMeshShowTest.gameObject);
             _canBePicked = true;
             _rb.isKinematic = false;
         }
@@ -64,11 +63,12 @@ public class OreMineable : MonoBehaviour, IMinable, IPickable
         // check if player have space in inventory
         // Destroy(this.gameObject);
         // and add to inventory if not, nothing happened
+        if (!_canBePicked) return;
         bool picked = inventory.TryAddItem(_itemSO);
-        if (picked && _canBePicked)
+        if (picked)
         {
+
             Destroy(gameObject);
-            _signalBus.Fire(new SignalItemPicked(_itemSO));
         }
         else
         {

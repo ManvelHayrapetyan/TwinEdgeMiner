@@ -1,36 +1,73 @@
 using TMPro;
 using UnityEngine;
 using Zenject;
+using UnityEngine.UI;
+using UnityEngine.EventSystems;
 
 public class UIManager : MonoBehaviour
 {
-    [Inject] private SignalBus _signalBus;
     [Inject] private readonly GameData _gameData;
+    [Inject] private readonly InputActions _inputActions;
+    [Inject] private readonly InputService _inputService;
 
-    [SerializeField] private TMP_Text _inventoryText;
+    [SerializeField] private TextMeshProUGUI _inventoryText;
+    [SerializeField] private TextMeshProUGUI _moneyText;
+
+    [SerializeField] private Button _closeButton;
+    [SerializeField] private Button _closeButton2;
+
+    private IClosableUI _currentUI;
+    private System.Action<UnityEngine.InputSystem.InputAction.CallbackContext> _cancelHandler;
 
     private void OnEnable()
     {
-        _signalBus.Subscribe<SignalItemPicked>(OnItemPicked);
+        _cancelHandler = ctx => TryCloseCurrent();
+        _inputActions.Global.Cancel.performed += _cancelHandler;
+        _closeButton.onClick.AddListener(TryCloseCurrent);
+        _closeButton2.onClick.AddListener(TryCloseCurrent);
     }
-
-    private void Start()
+    private void Update()
     {
+        UpgradeMoneyUI();
         UpgradeInventoryUI();
     }
 
     private void OnDisable()
     {
-        _signalBus.Unsubscribe<SignalItemPicked>(OnItemPicked);
+        _inputActions.Global.Cancel.performed -= _cancelHandler;
+        _closeButton.onClick.RemoveListener(TryCloseCurrent);
+        _closeButton2.onClick.RemoveListener(TryCloseCurrent);
     }
-    public void UpgradeInventoryUI()
+
+    public void ShowUI(IClosableUI ui)
     {
+        if (_currentUI != null && _currentUI != ui)
+            _currentUI.Close();
+
+        _currentUI = ui;
+        _currentUI.Open();
+        _inputService.SwitchToUI();
+    }
+
+    public void TryCloseCurrent()
+    {
+        Debug.Log("TryCloseCurrent called");
+        if (_currentUI != null && _currentUI.IsOpen)
+        {
+            _currentUI.Close();
+            _currentUI = null;
+            _inputService.SwitchToGameplay();
+            Debug.Log("TryCloseCurrent called 1");
+        }
+        else
+        {
+            Debug.Log("TryCloseCurrent called 2");
+            // TODO: Open pause menu
+        }
+    }
+
+    public void UpgradeInventoryUI() =>
         _inventoryText.text = $"{_gameData.Inventory.InventoryItemCount}/{_gameData.Inventory.InventorySize}";
-    }
 
-    private void OnItemPicked(SignalItemPicked _)
-    {
-        UpgradeInventoryUI();
-    }
-
+    public void UpgradeMoneyUI() => _moneyText.text = _gameData.Money.ToString();
 }

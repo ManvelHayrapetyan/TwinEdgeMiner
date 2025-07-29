@@ -11,6 +11,7 @@ public class UpgradeSO : ScriptableObject
     public IReadOnlyList<float> MiningToolDestructionDamageBonusPerLevel => _miningToolDestructionDamageBonusPerLevel;
     public IReadOnlyList<float> MiningToolStabilityDamageBonusPerLevel => _miningToolStabilityDamageBonusPerLevel;
     public IReadOnlyList<int> UpgradeCostPerLevel => _upgradeCostPerLevel;
+    public IReadOnlyList<float> MiningToolRadiusBonusPerLevel => _miningToolRadiusBonusPerLevel;
 
     [SerializeField, Min(1)] private int _maxUpgradeLevel = 10;
     [SerializeField] private List<int> _playerStaminaBonusPerLevel = new List<int>();
@@ -18,6 +19,7 @@ public class UpgradeSO : ScriptableObject
     [SerializeField] private List<float> _miningToolSpeedBonusPerLevel = new List<float>();
     [SerializeField] private List<float> _miningToolDestructionDamageBonusPerLevel = new List<float>();
     [SerializeField] private List<float> _miningToolStabilityDamageBonusPerLevel = new List<float>();
+    [SerializeField] private List<float> _miningToolRadiusBonusPerLevel = new List<float>();
     [SerializeField] private List<int> _upgradeCostPerLevel = new List<int>();
 
     private void OnValidate()
@@ -27,7 +29,9 @@ public class UpgradeSO : ScriptableObject
         ValidateListSize(ref _miningToolSpeedBonusPerLevel, nameof(_miningToolSpeedBonusPerLevel));
         ValidateListSize(ref _miningToolDestructionDamageBonusPerLevel, nameof(_miningToolDestructionDamageBonusPerLevel));
         ValidateListSize(ref _miningToolStabilityDamageBonusPerLevel, nameof(_miningToolStabilityDamageBonusPerLevel));
+        ValidateListSize(ref _miningToolRadiusBonusPerLevel, nameof(_miningToolRadiusBonusPerLevel));
         ValidateListSize(ref _upgradeCostPerLevel, nameof(_upgradeCostPerLevel));
+
     }
 
     private void ValidateListSize<T>(ref List<T> list, string listName)

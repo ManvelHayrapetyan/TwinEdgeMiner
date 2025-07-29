@@ -2,7 +2,7 @@
     "name": "InputActions",
     "maps": [
         {
-            "name": "Player",
+            "name": "Gameplay",
             "id": "953468a4-ca09-4bb5-a778-926a6c55d827",
             "actions": [
                 {
@@ -168,6 +168,62 @@
                     "processors": "",
                     "groups": "",
                     "action": "Interact",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                }
+            ]
+        },
+        {
+            "name": "UI",
+            "id": "be25fd3e-4a22-4b7f-9d15-f4d8969270f5",
+            "actions": [
+                {
+                    "name": "New action",
+                    "type": "Button",
+                    "id": "d2a61208-42d8-4abf-8362-95ed79d8c1c9",
+                    "expectedControlType": "Button",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
+                }
+            ],
+            "bindings": [
+                {
+                    "name": "",
+                    "id": "9e9f1163-e7fb-4578-9f9a-827c29896092",
+                    "path": "",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "New action",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                }
+            ]
+        },
+        {
+            "name": "Global",
+            "id": "5312e535-35ca-45dd-b2f1-e47f9db36e7b",
+            "actions": [
+                {
+                    "name": "Cancel",
+                    "type": "Button",
+                    "id": "e39cc465-bcd2-4d06-91ae-b3dc60a284c9",
+                    "expectedControlType": "Button",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
+                }
+            ],
+            "bindings": [
+                {
+                    "name": "",
+                    "id": "143ca936-2e30-4162-a709-449e1239e157",
+                    "path": "<Keyboard>/escape",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "Cancel",
                     "isComposite": false,
                     "isPartOfComposite": false
                 }

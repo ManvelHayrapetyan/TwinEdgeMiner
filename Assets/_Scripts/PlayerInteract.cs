@@ -10,12 +10,12 @@ public class PlayerInteract : MonoBehaviour
 
     private void OnEnable()
     {
-        _inputActions.Player.Interact.performed += Interact;
+        _inputActions.Gameplay.Interact.performed += Interact;
     }
 
     private void OnDisable()
     {
-        _inputActions.Player.Interact.performed -= Interact;
+        _inputActions.Gameplay.Interact.performed -= Interact;
     }
 
     private void Interact(InputAction.CallbackContext ctx)
@@ -25,15 +25,15 @@ public class PlayerInteract : MonoBehaviour
 
     private void TryInteract()
     {
-        if (_lookAtTargetDetector.TryRaycast(out RaycastHit hit))
+        if (_lookAtTargetDetector.TryRaycast(out _, out RaycastHit hit))
         {
             if (hit.collider.TryGetComponent<IPickable>(out var pickable))
             {
                 pickable.TryPick(_gameData.Inventory);
             }
-            else
+            else if (hit.collider.TryGetComponent<IInteractable>(out var interactable))
             {
-                //future here write interacting with upgrade and selling 
+                interactable.Interact();
             }
         }
     }

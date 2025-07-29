@@ -16,9 +16,9 @@ public class PlayerLook : MonoBehaviour
 
     private void OnEnable()
     {
-        CursorManager.Lock(); // is temporary
-        _inputActions.Player.Look.performed += OnLookPerformed;
-        _inputActions.Player.Look.canceled += OnLookCanceled;
+        //CursorManager.Lock(); // is temporary
+        _inputActions.Gameplay.Look.performed += OnLookPerformed;
+        _inputActions.Gameplay.Look.canceled += OnLookCanceled;
     }
 
     private void Update()
@@ -35,8 +35,8 @@ public class PlayerLook : MonoBehaviour
 
     private void OnDisable()
     {
-        _inputActions.Player.Look.performed -= OnLookPerformed;
-        _inputActions.Player.Look.canceled -= OnLookCanceled;
+        _inputActions.Gameplay.Look.performed -= OnLookPerformed;
+        _inputActions.Gameplay.Look.canceled -= OnLookCanceled;
     }
 
     private void OnLookPerformed(UnityEngine.InputSystem.InputAction.CallbackContext ctx)

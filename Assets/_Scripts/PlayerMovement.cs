@@ -24,9 +24,9 @@ public class PlayerMovement : MonoBehaviour
 
     private void OnEnable()
     {
-        _inputActions.Player.Move.performed += OnMovePerformed;
-        _inputActions.Player.Move.canceled += OnMoveCanceled;
-        _inputActions.Player.Jump.performed += Jump;
+        _inputActions.Gameplay.Move.performed += OnMovePerformed;
+        _inputActions.Gameplay.Move.canceled += OnMoveCanceled;
+        _inputActions.Gameplay.Jump.performed += Jump;
     }
 
     private void FixedUpdate()
@@ -36,9 +36,9 @@ public class PlayerMovement : MonoBehaviour
 
     private void OnDisable()
     {
-        _inputActions.Player.Move.performed -= OnMovePerformed;
-        _inputActions.Player.Move.canceled -= OnMoveCanceled;
-        _inputActions.Player.Jump.performed -= Jump;
+        _inputActions.Gameplay.Move.performed -= OnMovePerformed;
+        _inputActions.Gameplay.Move.canceled -= OnMoveCanceled;
+        _inputActions.Gameplay.Jump.performed -= Jump;
     }
 
     private void Move()

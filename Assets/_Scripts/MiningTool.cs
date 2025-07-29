@@ -12,14 +12,14 @@ public class MiningTool : MonoBehaviour
 
     private void OnEnable()
     {
-        _inputActions.Player.LMB.performed += OnLMB;
-        _inputActions.Player.RMB.performed += OnRMB;
+        _inputActions.Gameplay.LMB.performed += OnLMB;
+        _inputActions.Gameplay.RMB.performed += OnRMB;
     }
 
     private void OnDisable()
     {
-        _inputActions.Player.LMB.performed -= OnLMB;
-        _inputActions.Player.RMB.performed -= OnRMB;
+        _inputActions.Gameplay.LMB.performed -= OnLMB;
+        _inputActions.Gameplay.RMB.performed -= OnRMB;
     }
 
     private void OnLMB(InputAction.CallbackContext ctx)
@@ -34,14 +34,20 @@ public class MiningTool : MonoBehaviour
 
     private void TryMine(float destructionDamage, float stabilityDamage)
     {
-        if (_lookAtTargetDetector.TryRaycast(out RaycastHit hit))
+        if (_lookAtTargetDetector.TryRaycast(out Ray ray, out RaycastHit hit))
         {
             if (hit.collider.TryGetComponent<IMinable>(out var mineable))
             {
                 mineable.ApplyStabilityDamage(stabilityDamage);
-                mineable.ApplyDurabilityDamage(destructionDamage);
+                mineable.ApplyDurabilityDamage(destructionDamage, hit.point, ray.direction.normalized);
                 Debug.Log($"{nameof(destructionDamage)} = {destructionDamage}");
                 Debug.Log($"{nameof(stabilityDamage)} = {stabilityDamage}");
+            }
+            if (hit.collider.TryGetComponent<IVoxelDamageable>(out var voxelDamageable))
+            {
+                voxelDamageable.ApplyVoxelDamage(hit.point, 3f, stabilityDamage, destructionDamage);
+                Debug.Log($"Mesh {nameof(destructionDamage)} = {destructionDamage}");
+                Debug.Log($"Mesh {nameof(stabilityDamage)} = {stabilityDamage}");
             }
         }
     }

@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 
 [CreateAssetMenu(fileName = "PlayerAndToolBaseStatsSO", menuName = "PlayerAndToolBaseStatsSO")]
 public class PlayerAndToolBaseStatsSO : ScriptableObject
@@ -8,11 +9,13 @@ public class PlayerAndToolBaseStatsSO : ScriptableObject
     public float MiningToolSpeedBase => _miningToolSpeedBase ;
     public float MiningToolDestructionDamageBase => _miningToolDestructionDamageBase ;
     public float MiningToolStabilityDamageBase  => _miningToolStabilityDamageBase ;
+    public float MiningToolRadiusBase => _miningToolRadiusBase ;
 
     [SerializeField] private int _playerStaminaBase;
     [SerializeField] private int _playerInventorySizeBase;
     [SerializeField] private float _miningToolSpeedBase;
     [SerializeField] private float _miningToolDestructionDamageBase;
     [SerializeField] private float _miningToolStabilityDamageBase;
+    [SerializeField] private float _miningToolRadiusBase;
 
 }

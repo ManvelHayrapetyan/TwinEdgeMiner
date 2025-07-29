@@ -3,30 +3,30 @@ using Unity.VisualScripting;
 using UnityEngine;
 
 [RequireComponent(typeof(MeshFilter), typeof(MeshRenderer))]
-public class MarchingCubesGenerator : MonoBehaviour
+public class MarchingCubesGeneratorOLD : MonoBehaviour
 {
-    [SerializeField] private float noiseScale = 0.1f;
-    [SerializeField] private float noiseHeight = 8f;
-    [SerializeField] private Vector3 noiseOffset = Vector3.zero;
+    [SerializeField] private float _noiseScale = 0.1f;
+    [SerializeField] private float _noiseHeight = 8f;
+    [SerializeField] private Vector3 _noiseOffset = Vector3.zero;
 
-    [SerializeField] private int width = 16;
-    [SerializeField] private int height = 16;
-    [SerializeField] private int depth = 16;
-    [SerializeField] private float voxelSize = 1f;
-    [SerializeField] private float materialScale = 0.1f;
-    [SerializeField] private Material material;
+    [SerializeField] private int _width = 16;
+    [SerializeField] private int _height = 16;
+    [SerializeField] private int _depth = 16;
+    [SerializeField] private float _voxelSize = 1f;
+    [SerializeField] private float _materialScale = 0.1f;
+    [SerializeField] private Material _material;
 
 
     private MeshFilter _meshFilter;
     private MeshRenderer _meshRenderer;
-    private float AirDensity = 0f;
+    private float _airDensity = 0f;
 
     private void Awake()
     {
         _meshFilter = GetComponent<MeshFilter>();
         _meshRenderer = GetComponent<MeshRenderer>();
         GenerateMesh();
-        _meshRenderer.material = material;
+        _meshRenderer.material = _material;
     }
 
     private void GenerateMesh()
@@ -36,32 +36,32 @@ public class MarchingCubesGenerator : MonoBehaviour
         List<Vector3> normals = new();
         List<Vector2> uvs = new();
 
-        float[,,] density = new float[width + 1, height + 1, depth + 1];
+        float[,,] density = new float[_width + 1, _height + 1, _depth + 1];
 
-        for (int x = 0; x < width + 1; x++)
-            for (int y = 0; y < height + 1; y++)
-                for (int z = 0; z < depth + 1; z++)
+        for (int x = 0; x < _width + 1; x++)
+            for (int y = 0; y < _height + 1; y++)
+                for (int z = 0; z < _depth + 1; z++)
                 {
-                    float nx = (x + noiseOffset.x) * noiseScale;
-                    float nz = (z + noiseOffset.z) * noiseScale;
+                    float nx = (x + _noiseOffset.x) * _noiseScale;
+                    float nz = (z + _noiseOffset.z) * _noiseScale;
 
-                    float heightValue = Mathf.PerlinNoise(nx, nz) * noiseHeight;
+                    float heightValue = Mathf.PerlinNoise(nx, nz) * _noiseHeight;
 
                     density[x, y, z] = y < heightValue ? 1f : 0f;
 
                     //density[x, y, z] = 1f;
-                    if (x == 0 || y == 0 || z == 0 || x == width || y == height || z == depth)
-                    {
-                        density[x, y, z] = 0f;
-                    }
+                    //if (x == 0 || y == 0 || z == 0 || x == width || y == height || z == depth)
+                    //{
+                    //    density[x, y, z] = 0f;
+                    //}
                 }
 
 
-        for (int x = 0; x < width; x++)
-            for (int y = 0; y < height; y++)
-                for (int z = 0; z < depth; z++)
+        for (int x = 0; x < _width; x++)
+            for (int y = 0; y < _height; y++)
+                for (int z = 0; z < _depth; z++)
                 {
-                    Vector3 position = new Vector3(x, y, z) * voxelSize;
+                    Vector3 position = new Vector3(x, y, z) * _voxelSize;
                     MarchCube(position, density, x, y, z, vertices, triangles, normals, uvs);
                 }
 
@@ -70,7 +70,7 @@ public class MarchingCubesGenerator : MonoBehaviour
             vertices = vertices.ToArray(),
             triangles = triangles.ToArray(),
             normals = normals.ToArray(),
-            uv = uvs.ToArray()
+            //uv = uvs.ToArray()
         };
 
         mesh.RecalculateBounds();
@@ -92,7 +92,7 @@ public class MarchingCubesGenerator : MonoBehaviour
             int zi = z + MarchingTable.VertexOffset[i, 2];
 
             cubeValues[i] = density[xi, yi, zi];
-            cubePositions[i] = new Vector3(xi, yi, zi) * voxelSize;
+            cubePositions[i] = new Vector3(xi, yi, zi) * _voxelSize;
         }
 
         int cubeIndex = 0;
@@ -139,15 +139,15 @@ public class MarchingCubesGenerator : MonoBehaviour
             // Normals and UV
             Vector3 normal = CalculateNormal(edgeVertices[index0], density);
             normals.Add(normal);
-            uvs.Add(CalculateUV(edgeVertices[index0], normal));
+            //uvs.Add(CalculateUV(edgeVertices[index0], normal));
 
             normal = CalculateNormal(edgeVertices[index1], density);
             normals.Add(normal);
-            uvs.Add(CalculateUV(edgeVertices[index1], normal));
+            //uvs.Add(CalculateUV(edgeVertices[index1], normal));
 
             normal = CalculateNormal(edgeVertices[index2], density);
             normals.Add(normal);
-            uvs.Add(CalculateUV(edgeVertices[index2], normal));
+            //uvs.Add(CalculateUV(edgeVertices[index2], normal));
         }
     }
 
@@ -165,26 +165,26 @@ public class MarchingCubesGenerator : MonoBehaviour
 
     private Vector3 CalculateNormal(Vector3 pos, float[,,] density)
     {
-        float dx = SampleDensity(density, pos + new Vector3(voxelSize, 0, 0))
-                 - SampleDensity(density, pos - new Vector3(voxelSize, 0, 0));
+        float dx = SampleDensity(density, pos + new Vector3(_voxelSize, 0, 0))
+                 - SampleDensity(density, pos - new Vector3(_voxelSize, 0, 0));
 
-        float dy = SampleDensity(density, pos + new Vector3(0, voxelSize, 0))
-                 - SampleDensity(density, pos - new Vector3(0, voxelSize, 0));
+        float dy = SampleDensity(density, pos + new Vector3(0, _voxelSize, 0))
+                 - SampleDensity(density, pos - new Vector3(0, _voxelSize, 0));
 
-        float dz = SampleDensity(density, pos + new Vector3(0, 0, voxelSize))
-                 - SampleDensity(density, pos - new Vector3(0, 0, voxelSize));
+        float dz = SampleDensity(density, pos + new Vector3(0, 0, _voxelSize))
+                 - SampleDensity(density, pos - new Vector3(0, 0, _voxelSize));
 
         return -new Vector3(dx, dy, dz).normalized;
     }
 
     private float SampleDensity(float[,,] density, Vector3 pos)
     {
-        int x = Mathf.RoundToInt(pos.x / voxelSize);
-        int y = Mathf.RoundToInt(pos.y / voxelSize);
-        int z = Mathf.RoundToInt(pos.z / voxelSize);
+        int x = Mathf.RoundToInt(pos.x / _voxelSize);
+        int y = Mathf.RoundToInt(pos.y / _voxelSize);
+        int z = Mathf.RoundToInt(pos.z / _voxelSize);
 
-        if (x < 0 || x > width || y < 0 || y > height || z < 0 || z > depth)
-            return AirDensity;
+        if (x < 0 || x > _width || y < 0 || y > _height || z < 0 || z > _depth)
+            return _airDensity;
 
         return density[x, y, z];
     }
@@ -194,31 +194,18 @@ public class MarchingCubesGenerator : MonoBehaviour
         if (Mathf.Abs(n.y) >= Mathf.Abs(n.x) && Mathf.Abs(n.y) >= Mathf.Abs(n.z))
         {
             // Up/Down
-            return new Vector2(pos.x, pos.z) * materialScale;
+            return new Vector2(pos.x, pos.z) * _materialScale;
         }
         else if (Mathf.Abs(n.x) >= Mathf.Abs(n.y) && Mathf.Abs(n.x) >= Mathf.Abs(n.z))
         {
             //  X
-            return new Vector2(pos.z, pos.y) * materialScale;
+            return new Vector2(pos.z, pos.y) * _materialScale;
         }
         else
         {
             //  Z
-            return new Vector2(pos.x, pos.y) * materialScale;
+            return new Vector2(pos.x, pos.y) * _materialScale;
         }
-        //Vector2 result =
-        //    new Vector2(pos.z, pos.y) * n.x +
-        //    new Vector2(pos.x, pos.z) * n.y +
-        //    new Vector2(pos.x, pos.y) * n.z;
-        //result.Normalize();
-        //return result * materialScale;
-
-        //Vector2 uvX = new Vector2(pos.z, pos.y) * n.x;
-        //Vector2 uvY = new Vector2(pos.x, pos.z) * n.y;
-        //Vector2 uvZ = new Vector2(pos.x, pos.y) * n.z;
-
-        //float totalWeight = Mathf.Abs(n.x) + Mathf.Abs(n.y) + Mathf.Abs(n.z);
-        //if (totalWeight == 0) totalWeight = 1f;
 
         //Vector2 uv = (uvX + uvY + uvZ) / totalWeight;
         //uv *= materialScale;

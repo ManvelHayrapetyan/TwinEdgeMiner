@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.UIElements;
 using Zenject;
 
 public class GameInstaller : MonoInstaller
@@ -10,6 +11,13 @@ public class GameInstaller : MonoInstaller
 
     public override void InstallBindings()
     {
+
+        ////Signals
+        //SignalBusInstaller.Install(Container);
+        //Container.DeclareSignal<ItemPickedSignal>();
+        //Container.DeclareSignal<MoneyChangedSignal>();
+        //Container.DeclareSignal<InventoryChangedSignal>();
+
         SaveLoadManager saveLoadManager = new("/saveGameData.json");
         Container.Bind<ISaveLoadManager>().FromInstance(saveLoadManager).AsSingle();
         GameData gameData = saveLoadManager.LoadGame();
@@ -29,5 +37,9 @@ public class GameInstaller : MonoInstaller
         InputActions inputActions = new();
         inputActions.Enable();
         Container.Bind<InputActions>().FromInstance(inputActions).AsSingle();
+        InputService inputService = new(inputActions);
+        Container.Bind<InputService>().FromInstance(inputService).AsSingle();
+        inputService.SwitchToGameplay(); //Temporary
+
     }
 }

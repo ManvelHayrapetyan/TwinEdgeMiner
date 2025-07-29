@@ -1,6 +1,6 @@
-public class SignalItemPicked
+public class ItemPickedSignal
 {
-    public SignalItemPicked(ItemSO itemSO)
+    public ItemPickedSignal(ItemSO itemSO)
     {
         ItemSO = itemSO;
     }
