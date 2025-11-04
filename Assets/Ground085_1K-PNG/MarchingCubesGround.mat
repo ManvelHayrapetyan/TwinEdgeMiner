@@ -45,6 +45,18 @@ Material:
         m_Texture: {fileID: 2800000, guid: 7407f5cc007b9c6448180964b5bbc916, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _CrackTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _CrackText2D:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _CrackTexture:
+        m_Texture: {fileID: 2800000, guid: ff23a98dfbbbc484c8b6d806e5bfe8f0, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _MainTexture:
         m_Texture: {fileID: 2800000, guid: 7407f5cc007b9c6448180964b5bbc916, type: 3}
         m_Scale: {x: 1, y: 1}
@@ -57,7 +69,27 @@ Material:
         m_Texture: {fileID: 2800000, guid: 4369f45413a980e4cb70b887bb926050, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _Test:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _Test2:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _TestTry:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _TestTry3d:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _Texture2D:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _Texture2D_Array:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
@@ -89,5 +121,9 @@ Material:
     - _QueueOffset: 0
     - _Tile: 0.5
     - _Tiling: 1
-    m_Colors: []
+    - _VoxelSize: 0
+    m_Colors:
+    - _Vector3: {r: 0, g: 0, b: 0, a: 0}
+    - _WorldSize: {r: 0, g: 0, b: 0, a: 0}
+    - _WorldSize2: {r: 0, g: 0, b: 0, a: 0}
   m_BuildTextureStacks: []
