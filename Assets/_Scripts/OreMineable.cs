@@ -1,18 +1,32 @@
 using UnityEngine;
 using Zenject;
 
+public enum OreDamageResult
+{
+    None,
+    CrackChanged,
+    LayerDestroyed,
+    FullyMined
+}
+
 [RequireComponent(typeof(Rigidbody))]
 public class OreMineable : MonoBehaviour, IMinable, IPickable
 {
     public float Stability => _stability;
     public float Durability => _durability;
+    public float MaxStability => _maxStability;
+    public float MaxDurability => _maxDurability;
+
+    public float Radius => _groundRadius;
+
+    public Vector3 Center => _center;
 
     [Inject] private readonly MeshShow _meshShow;
 
     [SerializeField] private float _maxStability = 100f;
     [SerializeField] private float _maxDurability = 100f;
     [SerializeField] private int _maxStagesToDestroy = 3;
-    [SerializeField] private float _groundRadiusScale = 4f;
+    [SerializeField] private float _groundRadiusScale = 10f;
     [SerializeField] private ItemSO _itemSO;
 
     private int _stagesToDestroy;
@@ -38,45 +52,38 @@ public class OreMineable : MonoBehaviour, IMinable, IPickable
         _col = GetComponent<Collider>();
         Vector3 size = _col.bounds.size;
         _groundRadius = Mathf.Max(size.x, size.y, size.z) * _groundRadiusScale;
-        _center = transform.transform.position;
+        _center = transform.position;
     }
 
-    private void Start()
+    public OreDamageResult ApplyDamage(float stabilityDamage, float durabilityDamage)
     {
-        _groundVoxels = _meshShow.OreGroundInitialize(_center, _groundRadius);
-    }
+        if (_canBePicked) 
+            return OreDamageResult.None;
 
-    public void ApplyDamage(Vector3 hitPoint, float stabilityDamage, float durabilityDamage)
-    {
-        if (_canBePicked) return;
-        _stability = Mathf.Clamp(_stability - stabilityDamage, 0, _maxStability);
-        if (_maxStability == 0)
-            _durability = Mathf.Clamp(_durability - durabilityDamage,
-                0, _maxDurability);
-        else
-            _durability = Mathf.Clamp(_durability - durabilityDamage *
-                (_maxStability - _stability) / _maxStability,
-                0, _maxDurability);
+        _stability = Mathf.Max(0, _stability - stabilityDamage);
+        float durabilityReduction = (_maxStability == 0)
+            ? durabilityDamage
+            : durabilityDamage * (_maxStability - _stability) / _maxStability;
+        _durability = Mathf.Max(0, _durability - durabilityReduction);
 
-        // Here call change crack level
-        _meshShow.ApplyCrack(hitPoint, _center, _stability, _maxStability, _groundVoxels);
+        OreDamageResult oreDamageResult = OreDamageResult.CrackChanged;
 
         if (_durability <= 0f)
         {
-            Debug.Log("Halo durability ijava ara");
             _stability = _maxStability;
             _durability = _maxDurability;
             _stagesToDestroy -= 1;
-            // here call or create event who destroy part of mesh
-            _meshShow.DestroyVoxelShellLayer(hitPoint, _center, _groundVoxels);
+            oreDamageResult = OreDamageResult.LayerDestroyed;
         }
         if (_stagesToDestroy <= 0)
         {
-            Debug.Log("Ore Fully Mined");
-            _meshShow.DestroyAllVoxels(_groundVoxels);
+            oreDamageResult = OreDamageResult.FullyMined;
             _canBePicked = true;
             _rb.isKinematic = false;
         }
+        Debug.Log($"OreDamageResult: {oreDamageResult}, Stability: {_stability}, Durability: {_durability}");
+
+        return oreDamageResult;
     }
 
     public void TryPick(Inventory inventory)
