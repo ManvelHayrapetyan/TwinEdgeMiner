@@ -1,5 +1,9 @@
-using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
+using Unity.Burst;
+using Unity.Collections;
+using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 
 
@@ -12,33 +16,26 @@ public class VoxelChunk : IVoxelData
     public float MaxStability { get; }
     public float MaxDurability { get; }
     public VoxelChunkPadding Padding { get; }
+    public NativeArray<float> Dencity { get => voxelArray; }
     public float this[int x, int y, int z]
     {
-        get => _data[x, y, z];
-        set => _data[x, y, z] = value;
+        get => voxelArray[GetFlatIndex(x, y, z)];
+        set => voxelArray[GetFlatIndex(x, y, z)] = value;
     }
-
 
     private const float IsoLevel = 0.5f;
 
-    private readonly float[,,] _data;
-    private readonly float[,,] _stability;
-    private readonly float[,,] _durability;
-    private readonly int[,,] _oreIndex;
-    private readonly float[,,] _crackPercent;
+    private NativeArray<float> voxelArray;
+    private NativeArray<float> durabilityArray;
+    private NativeArray<float> stabilityArray;
+    private NativeArray<int> oreIndexArray;
+    private NativeArray<float> crackPercentArray;
+    private NativeArray<Color32> crackColorArray;
 
+    private readonly float _alpha;
 
-    private static readonly Vector3Int[] NeighborDirs = {
-        new(1,0,0), new(-1,0,0),
-        new(0,1,0), new(0,-1,0),
-        new(0,0,1), new(0,0,-1)};
+    private readonly CubeVoxelGenerator _cubeVoxelGenerator = new();
 
-    private float _alpha;
-
-    private CubeVoxelGenerator _cubeVoxelGenerator = new();
-
-    private Texture3D _crackTex;
-    private Color[] _crackColors;
     public VoxelChunk(int width, int height, int depth, float voxelSize, float maxStability, float maxDurability, float alpha)
     {
         Width = width;
@@ -48,194 +45,420 @@ public class VoxelChunk : IVoxelData
         MaxStability = maxStability;
         MaxDurability = maxDurability;
 
-        _data = new float[width, height, depth];
-        _stability = new float[width, height, depth];
-        _durability = new float[width, height, depth];
-        _oreIndex = new int[width, height, depth];
-        _crackPercent = new float[width, height, depth];
-
         _alpha = alpha;
 
-        _cubeVoxelGenerator.Fill(this);
-
-        _crackTex = new Texture3D(Width, Height, Depth, TextureFormat.RGBA32, false);
-        _crackColors = new Color[Width * Height * Depth];
-
         Padding = new(width, height, depth);
+
+        voxelArray = new NativeArray<float>(Width * Height * Depth, Allocator.Persistent);
+        durabilityArray = new NativeArray<float>(voxelArray.Length, Allocator.Persistent);
+        stabilityArray = new NativeArray<float>(voxelArray.Length, Allocator.Persistent);
+        oreIndexArray = new NativeArray<int>(voxelArray.Length, Allocator.Persistent);
+        crackPercentArray = new NativeArray<float>(voxelArray.Length, Allocator.Persistent);
+        crackColorArray = new NativeArray<Color32>(voxelArray.Length, Allocator.Persistent);
+
+        _cubeVoxelGenerator.Fill(this);
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int GetFlatIndex(int x, int y, int z) => x + y * Width + z * Width * Height;
 
     public void SetDurability(int x, int y, int z, float durability)
     {
-        _durability[x, y, z] = durability;
-        if (durability <= 0) this[x, y, z] = 0f;
+        durabilityArray[GetFlatIndex(x, y, z)] = durability;
+        if (durability <= 0) voxelArray[GetFlatIndex(x, y, z)] = 0f;
     }
 
     public void SetStability(int x, int y, int z, float stability)
     {
-        _stability[x, y, z] = stability;
+        stabilityArray[GetFlatIndex(x, y, z)] = stability;
     }
-    public int[] ApplyDamage(Vector3 hitPosition, float radius, float stabilityDamage, float durabilityDamage)
+    public int[] ApplyDamage(Vector3 worldPosition, float radius, float stabilityDamage, float durabilityDamage)
     {
-        HashSet<int> indexes = new();
+        NativeQueue<int> oreQueue = new(Allocator.TempJob);
 
-        Vector3 localPos = hitPosition / VoxelSize;
-        float radiusVox = radius / VoxelSize;
-        float sqrRadius = radiusVox * radiusVox;
-        int minX = Mathf.Max(0, Mathf.FloorToInt(localPos.x - radiusVox));
-        int maxX = Mathf.Min(Width - 1, Mathf.CeilToInt(localPos.x + radiusVox));
-        int minY = Mathf.Max(0, Mathf.FloorToInt(localPos.y - radiusVox));
-        int maxY = Mathf.Min(Height - 1, Mathf.CeilToInt(localPos.y + radiusVox));
-        int minZ = Mathf.Max(0, Mathf.FloorToInt(localPos.z - radiusVox));
-        int maxZ = Mathf.Min(Depth - 1, Mathf.CeilToInt(localPos.z + radiusVox));
-
-        for (int x = minX; x <= maxX; x++)
-            for (int y = minY; y <= maxY; y++)
-                for (int z = minZ; z <= maxZ; z++)
-                {
-                    if (this[x, y, z] < 0.5f || _durability[x, y, z] <= 0)
-                        continue;
-
-                    Vector3 voxelCenter = new(x + 0.5f, y + 0.5f, z + 0.5f);
-                    Vector3 delta = voxelCenter - localPos;
-                    float distanceSq = delta.sqrMagnitude;
-
-                    if (distanceSq > sqrRadius)
-                        continue;
-                    if (_oreIndex[x, y, z] > 0)
-                    {
-                        indexes.Add(_oreIndex[x, y, z]);
-                        continue;
-                    }
-
-                    float damageFactor = Mathf.Clamp01(1f - Mathf.Sqrt(distanceSq) / radiusVox);
-                    _stability[x, y, z] = Mathf.Max(0, _stability[x, y, z] - stabilityDamage * damageFactor);
-
-                    float durabilityReduction = (MaxStability == 0)
-                        ? durabilityDamage * damageFactor
-                        : durabilityDamage * damageFactor * (MaxStability - _stability[x, y, z]) / MaxStability;
-
-                    _durability[x, y, z] = Mathf.Max(0, _durability[x, y, z] - durabilityReduction);
-
-                    float normalizedDurability = _durability[x, y, z] / MaxDurability;
-                    this[x, y, z] = normalizedDurability <= 0f ? 0f : 0.5f + 0.5f * normalizedDurability;
-                }
-        return indexes.ToArray();
-    }
-
-    public void OreGroundInitialize(Vector3 center, float radius, int index)
-    {
-        int count = 0;
-        List<int> indexes = new();
-        Vector3 localPos = center / VoxelSize;
-        float radiusVox = radius / VoxelSize;
-        float sqrRadius = radiusVox * radiusVox;
-        int minX = Mathf.Max(0, Mathf.FloorToInt(localPos.x - radiusVox));
-        int maxX = Mathf.Min(Width - 1, Mathf.CeilToInt(localPos.x + radiusVox));
-        int minY = Mathf.Max(0, Mathf.FloorToInt(localPos.y - radiusVox));
-        int maxY = Mathf.Min(Height - 1, Mathf.CeilToInt(localPos.y + radiusVox));
-        int minZ = Mathf.Max(0, Mathf.FloorToInt(localPos.z - radiusVox));
-        int maxZ = Mathf.Min(Depth - 1, Mathf.CeilToInt(localPos.z + radiusVox));
-
-        for (int x = minX; x <= maxX; x++)
-            for (int y = minY; y <= maxY; y++)
-                for (int z = minZ; z <= maxZ; z++)
-                {
-                    if (this[x, y, z] < 0.5f || _durability[x, y, z] <= 0)
-                        continue;
-                    Vector3 voxelCenter = new Vector3(x + 0.5f, y + 0.5f, z + 0.5f);
-                    if ((voxelCenter - localPos).sqrMagnitude <= sqrRadius)
-                    {
-                        _oreIndex[x, y, z] = index;
-                        count++;
-                    }
-                }
-        Debug.Log($"idenx {index} - count - {count}");
-    }
-
-    public Color[] ApplyCrack(Vector3 hitPoint, Vector3 center, float stability, float maxStability, int oreIndex)
-    {
-        Vector3 hitPointVox = hitPoint / VoxelSize;
-        Vector3 centerVox = center / VoxelSize;
-        Vector3 hitDirection = (hitPointVox - centerVox).normalized;
-        float angle = Mathf.Cos(_alpha * Mathf.Deg2Rad);
-        for (int x = 0; x < Width; x++)
-            for (int y = 0; y < Height; y++)
-                for (int z = 0; z < Depth; z++)
-                {
-                    //_crackPercent[x, y, z] = 1;
-                    //_crackColors[x + y * Width + z * Width * Height] = new Color(1, 0, 0, 0);
-
-                    if (this[x, y, z] < 0.5f || _durability[x, y, z] <= 0)
-                        continue;
-                    if (_oreIndex[x, y, z] != oreIndex)
-                        continue;
-                    Vector3 voxelPos = new Vector3(x + 0.5f, y + 0.5f, z + 0.5f);
-                    Vector3 toVoxel = (voxelPos - centerVox).normalized;
-                    if (Vector3.Dot(hitDirection, toVoxel) >= angle)
-                    {
-                        float crackPercent = maxStability != 0 ? 1 - stability / maxStability : 0;
-
-                        if (IsAdjacentToAir(new Vector3Int(x, y, z)))
-                        {
-                            _crackPercent[x, y, z] = crackPercent;
-                            _crackColors[x + y * Width + z * Width * Height] = new Color(crackPercent, 0, 0, 0);
-                        }
-                    }
-                }
-        return _crackColors;
-    }
-
-    public void DestroyOreShellLayer(Vector3 hitPoint, Vector3 center, int oreIndex)
-    {
-        Vector3 hitPointVox = hitPoint / VoxelSize;
-        Vector3 centerVox = center / VoxelSize;
-        Vector3 hitDirection = (hitPointVox - centerVox).normalized;
-        float angle = Mathf.Cos(_alpha * Mathf.Deg2Rad);
-        for (int x = 0; x < Width; x++)
-            for (int y = 0; y < Height; y++)
-                for (int z = 0; z < Depth; z++)
-                {
-                    if (x < 5 && y < 5 && z < 5)
-                        this[x, y, z] = 0;
-                    if (this[x, y, z] < 0.5f || _durability[x, y, z] <= 0)
-                        continue;
-                    if (_oreIndex[x, y, z] != oreIndex)
-                        continue;
-
-                    Vector3 voxelPos = new Vector3(x + 0.5f, y + 0.5f, z + 0.5f);
-                    Vector3 toVoxel = (voxelPos - centerVox).normalized;
-
-                    if (Vector3.Dot(hitDirection, toVoxel) >= angle || _crackPercent[x, y, z] > 0)
-                    {
-                        this[x, y, z] = 0f;
-                    }
-                }
-    }
-
-    public void DestroyAllOreVoxels(int oreIndex)
-    {
-        for (int x = 0; x < Width; x++)
-            for (int y = 0; y < Height; y++)
-                for (int z = 0; z < Depth; z++)
-                {
-                    if (this[x, y, z] < 0.5f || _durability[x, y, z] <= 0)
-                        continue;
-                    if (_oreIndex[x, y, z] != oreIndex)
-                        continue;
-                    this[x, y, z] = 0;
-                }
-    }
-
-    private bool IsAdjacentToAir(Vector3Int voxel)
-    {
-        foreach (var dir in NeighborDirs)
+        var job = new ApplyDamageJob
         {
-            Vector3Int neighbor = voxel + dir;
+            Width = Width,
+            Height = Height,
+            Depth = Depth,
+            MaxStability = MaxStability,
+            MaxDurability = MaxDurability,
 
-            if (GetVoxelValue(neighbor.x, neighbor.y, neighbor.z) < 0.5f)
-                return true;
+            Data = voxelArray,
+            Durability = durabilityArray,
+            Stability = stabilityArray,
+            OreIndex = oreIndexArray,
+
+            LocalPosVox = worldPosition / VoxelSize,
+            RadiusVox = radius / VoxelSize,
+            SqrRadiusVox = (radius / VoxelSize) * (radius / VoxelSize),
+            StabilityDamage = stabilityDamage,
+            DurabilityDamage = durabilityDamage,
+
+            FoundOreIndexes = oreQueue.AsParallelWriter()
+        };
+
+        JobHandle handle = job.Schedule(voxelArray.Length, 64);
+        handle.Complete();
+
+        var tmp = oreQueue.ToArray(Allocator.Temp);
+        int[] returnArray = tmp.Distinct().ToArray();
+        tmp.Dispose();
+        oreQueue.Dispose();
+        return returnArray;
+    }
+
+    [BurstCompile]
+    public struct ApplyDamageJob : IJobParallelFor
+    {
+        [ReadOnly] public int Width;
+        [ReadOnly] public int Height;
+        [ReadOnly] public int Depth;
+        [ReadOnly] public float MaxStability;
+        [ReadOnly] public float MaxDurability;
+
+        [NativeDisableParallelForRestriction] public NativeArray<float> Data; // read/write
+        [NativeDisableParallelForRestriction] public NativeArray<float> Stability;
+        [NativeDisableParallelForRestriction] public NativeArray<float> Durability;
+        [NativeDisableParallelForRestriction] public NativeArray<int> OreIndex;
+
+        [ReadOnly] public float3 LocalPosVox; // hitPosition in voxel units
+        [ReadOnly] public float RadiusVox;
+        [ReadOnly] public float SqrRadiusVox;
+        [ReadOnly] public float StabilityDamage;
+        [ReadOnly] public float DurabilityDamage;
+
+        // Output: unique ore indexes found. We'll push occurrences; caller can dedupe.
+        //public NativeHashSet<int> FoundOreIndexes; // must be created with Allocator.TempJob
+        public NativeQueue<int>.ParallelWriter FoundOreIndexes;
+
+        public void Execute(int index)
+        {
+            // read scalar (value)
+            float val = Data[index];
+            if (val < 0.5f) return;
+
+            float dur = Durability[index];
+            if (dur <= 0f) return;
+
+            // index is 1D index of voxel (0..W*H*D-1)
+            // compute x,y,z if necessary (we'll compute center)
+            int z = index / (Width * Height);
+            int rem = index - z * Width * Height;
+            int y = rem / Width;
+            int x = rem % Width;
+
+
+            // compute voxel center in voxel cords (x+0.5 etc)
+            float3 voxelCenter = new float3(x + 0.5f, y + 0.5f, z + 0.5f);
+            float3 delta = voxelCenter - LocalPosVox;
+            float distanceSq = math.lengthsq(delta);
+
+            if (distanceSq > SqrRadiusVox) return;
+
+            int ore = OreIndex[index];
+            if (ore > 0)
+            {
+                FoundOreIndexes.Enqueue(ore);
+                return;
+            }
+
+            float damageFactor = math.clamp(1f - math.sqrt(distanceSq) / RadiusVox, 0f, 1f);
+
+            float st = Stability[index];
+            st = math.max(0f, st - StabilityDamage * damageFactor);
+            Stability[index] = st;
+
+            float durabilityReduction = (MaxStability == 0f)
+                ? DurabilityDamage * damageFactor
+                : DurabilityDamage * damageFactor * (MaxStability - st) / MaxStability;
+
+            dur = math.max(0f, dur - durabilityReduction);
+            Durability[index] = dur;
+
+            float normalizedDurability = dur / MaxDurability;
+            Data[index] = normalizedDurability <= 0f ? 0f : 0.5f + 0.5f * normalizedDurability;
         }
-        return false;
+    }
+
+    public void OreGroundInitialize(Vector3 center, float radius, int oreTypeIndex)
+    {
+        var job = new OreGroundInitializeJob
+        {
+            Width = Width,
+            Height = Height,
+            Depth = Depth,
+            OreTypeIndex = oreTypeIndex,
+
+            Data = voxelArray,
+            OreIndex = oreIndexArray,
+
+            LocalPosVox = center / VoxelSize,
+            SqrRadiusVox = (radius / VoxelSize) * (radius / VoxelSize),
+        };
+
+        JobHandle handle = job.Schedule(voxelArray.Length, 64);
+        handle.Complete();
+    }
+
+    [BurstCompile]
+    public struct OreGroundInitializeJob : IJobParallelFor
+    {
+        [ReadOnly] public int Width;
+        [ReadOnly] public int Height;
+        [ReadOnly] public int Depth;
+        [ReadOnly] public int OreTypeIndex;
+
+        [NativeDisableParallelForRestriction] public NativeArray<float> Data;
+        [NativeDisableParallelForRestriction] public NativeArray<int> OreIndex;
+
+        [ReadOnly] public float3 LocalPosVox;
+        [ReadOnly] public float SqrRadiusVox;
+
+        public void Execute(int index)
+        {
+            float val = Data[index];
+            if (val < 0.5f) return;
+
+            int z = index / (Width * Height);
+            int rem = index - z * Width * Height;
+            int y = rem / Width;
+            int x = rem % Width;
+
+            float3 voxelCenter = new(x + 0.5f, y + 0.5f, z + 0.5f);
+            if (math.lengthsq(voxelCenter - LocalPosVox) <= SqrRadiusVox)
+            {
+                OreIndex[index] = OreTypeIndex;
+            }
+        }
+    }
+
+    public NativeArray<Color32> ApplyCrack(Vector3 hitPoint, Vector3 center, float stability, float maxStability, int oreTypeIndex)
+    {
+        var job = new ApplyCrackJob
+        {
+            Width = Width,
+            Height = Height,
+            Depth = Depth,
+
+            Stability = stability,
+            MaxStability = maxStability,
+
+            OreTypeIndex = oreTypeIndex,
+            Angle = Mathf.Cos(_alpha * Mathf.Deg2Rad),
+
+            Data = voxelArray,
+            CrackPercent = crackPercentArray,
+            OreIndex = oreIndexArray,
+            CrackColors = crackColorArray,
+
+            FaceXPlus = Padding.FaceXPlus.Current,
+            FaceYPlus = Padding.FaceYPlus.Current,
+            FaceZPlus = Padding.FaceZPlus.Current,
+
+            FaceXMinus = Padding.FaceXMinus.Current,
+            FaceYMinus = Padding.FaceYMinus.Current,
+            FaceZMinus = Padding.FaceZMinus.Current,
+
+            CenterVox = center / VoxelSize,
+            HitDirVox = math.normalize(hitPoint / VoxelSize - center / VoxelSize),
+
+        };
+
+        JobHandle handle = job.Schedule(voxelArray.Length, 64);
+        handle.Complete();
+
+        return crackColorArray;
+    }
+    [BurstCompile]
+    public struct ApplyCrackJob : IJobParallelFor
+    {
+        [ReadOnly] public int Width;
+        [ReadOnly] public int Height;
+        [ReadOnly] public int Depth;
+
+        [ReadOnly] public int OreTypeIndex;
+        [ReadOnly] public float Angle;
+
+        [ReadOnly] public float Stability;
+        [ReadOnly] public float MaxStability;
+
+        [ReadOnly] public NativeArray<float> Data; // read/write
+        [NativeDisableParallelForRestriction] public NativeArray<float> CrackPercent;
+        [ReadOnly] public NativeArray<int> OreIndex;
+        [NativeDisableParallelForRestriction] public NativeArray<Color32> CrackColors;
+
+        [ReadOnly] public NativeArray<float> FaceXPlus;
+        [ReadOnly] public NativeArray<float> FaceYPlus;
+        [ReadOnly] public NativeArray<float> FaceZPlus;
+
+        [ReadOnly] public NativeArray<float> FaceXMinus;
+        [ReadOnly] public NativeArray<float> FaceYMinus;
+        [ReadOnly] public NativeArray<float> FaceZMinus;
+
+        [ReadOnly] public float3 CenterVox;
+        [ReadOnly] public float3 HitDirVox;
+
+        public void Execute(int index)
+        {
+            if (Data[index] < 0.5f) return;
+            if (OreIndex[index] != OreTypeIndex) return;
+
+            int z = index / (Width * Height);
+            int rem = index - z * Width * Height;
+            int y = rem / Width;
+            int x = rem % Width;
+
+            float3 voxelPos = new(x + 0.5f, y + 0.5f, z + 0.5f);
+            float3 toVoxel = math.normalize(voxelPos - CenterVox);
+            if (math.dot(HitDirVox, toVoxel) >= Angle)
+            {
+                float crackPercent = MaxStability != 0 ? 1 - Stability / MaxStability : 0;
+
+                if (IsAdjacentToAir(x, y, z))
+                {
+                    CrackPercent[index] = crackPercent;
+                    byte v = (byte)(crackPercent * 255f);
+                    CrackColors[index] = new Color32(v, 0, 0, 0);
+                }
+            }
+        }
+
+        private bool IsAdjacentToAir(int x, int y, int z)
+        {
+            if (GetVoxelValue(x + 1, y, z) < 0.5f)
+                return true;
+            if (GetVoxelValue(x, y + 1, z) < 0.5f)
+                return true;
+            if (GetVoxelValue(x, y, z + 1) < 0.5f)
+                return true;
+            if (GetVoxelValue(x - 1, y, z) < 0.5f)
+                return true;
+            if (GetVoxelValue(x, y - 1, z) < 0.5f)
+                return true;
+            if (GetVoxelValue(x, y, z - 1) < 0.5f)
+                return true;
+
+            return false;
+        }
+
+        public float GetVoxelValue(int x, int y, int z)
+        {
+            if (x >= 0 && x < Width &&
+                y >= 0 && y < Height &&
+                z >= 0 && z < Depth)
+            {
+                return Data[x + y * Width + z * Width * Height];
+            }
+
+            if (x == Width && y >= 0 && y < Height && z >= 0 && z < Depth)
+                return FaceXPlus[y + z * Height];
+            if (x == -1 && y >= 0 && y < Height && z >= 0 && z < Depth)
+                return FaceXMinus[y + z * Height];
+
+            if (y == Height && x >= 0 && x < Width && z >= 0 && z < Depth)
+                return FaceYPlus[x + z * Width];
+            if (y == -1 && x >= 0 && x < Width && z >= 0 && z < Depth)
+                return FaceYMinus[x + z * Width];
+
+            if (z == Depth && x >= 0 && x < Width && y >= 0 && y < Height)
+                return FaceZPlus[x + y * Width];
+            if (z == -1 && x >= 0 && x < Width && y >= 0 && y < Height)
+                return FaceZMinus[x + y * Width];
+
+            return 0f;
+        }
+    }
+
+    public void DestroyOreShellLayer(Vector3 hitPoint, Vector3 center, int oreTypeIndex)
+    {
+        var job = new DestroyOreShellLayerJob
+        {
+            Width = Width,
+            Height = Height,
+            Depth = Depth,
+
+            OreTypeIndex = oreTypeIndex,
+            Angle = Mathf.Cos(_alpha * Mathf.Deg2Rad),
+
+            Data = voxelArray,
+            CrackPercent = crackPercentArray,
+            OreIndex = oreIndexArray,
+
+            CenterVox = center / VoxelSize,
+            HitDirVox = math.normalize(hitPoint / VoxelSize - center / VoxelSize),
+
+        };
+
+        JobHandle handle = job.Schedule(voxelArray.Length, 64);
+        handle.Complete();
+    }
+
+    [BurstCompile]
+    public struct DestroyOreShellLayerJob : IJobParallelFor
+    {
+        [ReadOnly] public int Width;
+        [ReadOnly] public int Height;
+        [ReadOnly] public int Depth;
+
+        [ReadOnly] public int OreTypeIndex;
+        [ReadOnly] public float Angle;
+
+        [NativeDisableParallelForRestriction] public NativeArray<float> Data; // read/write
+        [NativeDisableParallelForRestriction] public NativeArray<float> CrackPercent;
+        [NativeDisableParallelForRestriction] public NativeArray<int> OreIndex;
+
+        [ReadOnly] public float3 CenterVox;
+        [ReadOnly] public float3 HitDirVox;
+
+        public void Execute(int index)
+        {
+            if (Data[index] < 0.5f) return;
+            if (OreIndex[index] != OreTypeIndex) return;
+
+            int z = index / (Width * Height);
+            int rem = index - z * Width * Height;
+            int y = rem / Width;
+            int x = rem % Width;
+
+            float3 voxelPos = new(x + 0.5f, y + 0.5f, z + 0.5f);
+            float3 toVoxel = math.normalize(voxelPos - CenterVox);
+            if (math.dot(HitDirVox, toVoxel) >= Angle || CrackPercent[index] > 0)
+            {
+                Data[index] = 0f;
+            }
+        }
+
+    }
+
+    public void DestroyAllOreVoxels(int oreTypeIndex)
+    {
+        var job = new DestroyAllOreVoxelsJob
+        {
+            OreTypeIndex = oreTypeIndex,
+
+            Data = voxelArray,
+            OreIndex = oreIndexArray
+        };
+
+        JobHandle handle = job.Schedule(voxelArray.Length, 64);
+        handle.Complete();
+    }
+
+    [BurstCompile]
+    public struct DestroyAllOreVoxelsJob : IJobParallelFor
+    {
+        [ReadOnly] public int OreTypeIndex;
+
+        [NativeDisableParallelForRestriction] public NativeArray<float> Data;
+        [NativeDisableParallelForRestriction] public NativeArray<int> OreIndex;
+
+        public void Execute(int index)
+        {
+            if (Data[index] < 0.5f) return;
+            if (OreIndex[index] != OreTypeIndex) return;
+            Data[index] = 0;
+        }
     }
 
     public void ApplyWorldBoundaries(bool left, bool right, bool bottom, bool top, bool back, bool front)
@@ -284,5 +507,16 @@ public class VoxelChunk : IVoxelData
             return Padding.CornerXPlusYPlusZPlus.Get(0, 0);
 
         return 0f;
+    }
+
+    public void Dispose()
+    {
+        if (voxelArray.IsCreated) voxelArray.Dispose();
+        if (durabilityArray.IsCreated) durabilityArray.Dispose();
+        if (stabilityArray.IsCreated) stabilityArray.Dispose();
+        if (oreIndexArray.IsCreated) oreIndexArray.Dispose();
+        if (crackPercentArray.IsCreated) crackPercentArray.Dispose();
+        if (crackColorArray.IsCreated) crackColorArray.Dispose();
+        Padding.DisposeAll();
     }
 }

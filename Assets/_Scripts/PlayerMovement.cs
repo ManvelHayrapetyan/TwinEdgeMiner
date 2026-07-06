@@ -22,6 +22,7 @@ public class PlayerMovement : MonoBehaviour
     {
         _rb = GetComponent<Rigidbody>();
         _capsuleCollider = GetComponent<CapsuleCollider>();
+
     }
 
     private void OnEnable()
@@ -51,7 +52,7 @@ public class PlayerMovement : MonoBehaviour
         float speed = _isRunning ? _runSpeed : _walkSpeed;
         Vector3 moveDir = transform.forward * _moveInput.y + transform.right * _moveInput.x;
         Vector3 targetVelocity = moveDir * speed;
-        Vector3 velocity = _rb.velocity;
+        Vector3 velocity = _rb.linearVelocity;
         Vector3 velocityChange = targetVelocity - velocity;
         velocityChange.y = 0f;
 
@@ -82,9 +83,9 @@ public class PlayerMovement : MonoBehaviour
     {
         if (IsGrounded())
         {
-            Vector3 vel = _rb.velocity;
+            Vector3 vel = _rb.linearVelocity;
             vel.y = 0f;
-            _rb.velocity = vel;
+            _rb.linearVelocity = vel;
             _rb.AddForce(Vector3.up * _jumpForce, ForceMode.Impulse);
         }
     }

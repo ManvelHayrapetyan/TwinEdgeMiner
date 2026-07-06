@@ -1,23 +1,33 @@
+using Unity.Collections;
+
 public class VoxelPaddingLayer
 {
-    public float[,] Current { get; private set; }
-    public float[,] Next { get; private set; }
+    public NativeArray<float> Current => _current;
+    private NativeArray<float> _current;
+    private NativeArray<float> _next;
 
-    public int Width { get; }
-    public int Height { get; }
+    private int _width;
+    private int _height;
 
     public VoxelPaddingLayer(int width, int height)
     {
-        Width = width;
-        Height = height;
-        Current = new float[width, height];
-        Next = new float[width, height];
+        _width = width;
+        _height = height;
+
+        _current = new NativeArray<float>(width * height, Allocator.Persistent);
+        _next = new NativeArray<float>(width * height, Allocator.Persistent);
     }
 
     public void Swap()
     {
-        (Next, Current) = (Current, Next);
+        (_next, _current) = (_current, _next);
     }
-    public float Get(int x, int y) => Current[x, y];
-    public void Set(int x, int y, float value) => Next[x, y] = value;
+    public float Get(int x, int y) => _current[x + y * _width];
+    public void Set(int x, int y, float value) => _next[x + y * _width] = value;
+
+    public void Dispose()
+    {
+        if (_current.IsCreated) _current.Dispose();
+        if (_next.IsCreated) _next.Dispose();
+    }
 }

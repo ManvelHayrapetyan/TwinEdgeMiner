@@ -10,8 +10,8 @@ public class PhysicsDamping : MonoBehaviour
     private void Awake()
     {
         _rb = GetComponent<Rigidbody>();
-        _rb.drag = _drag;
-        _rb.angularDrag = _angularDrag;
+        _rb.linearDamping = _drag;
+        _rb.angularDamping = _angularDrag;
     }
 
 }

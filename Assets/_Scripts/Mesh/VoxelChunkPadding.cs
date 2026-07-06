@@ -46,4 +46,21 @@ public class VoxelChunkPadding
 
         CornerXPlusYPlusZPlus.Swap();
     }
+
+    public void DisposeAll()
+    {
+        FaceXPlus?.Dispose();
+        FaceYPlus?.Dispose();
+        FaceZPlus?.Dispose();
+
+        FaceXMinus?.Dispose();
+        FaceYMinus?.Dispose();
+        FaceZMinus?.Dispose();
+
+        EdgeXPlusYPlus?.Dispose();
+        EdgeXPlusZPlus?.Dispose();
+        EdgeYPlusZPlus?.Dispose();
+
+        CornerXPlusYPlusZPlus?.Dispose();
+    }
 }

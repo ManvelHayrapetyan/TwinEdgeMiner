@@ -34,9 +34,9 @@ MonoBehaviour:
   - 10
   - 20
   _miningToolRadiusBonusPerLevel:
-  - 1
-  - 2
-  - 2
-  - 3
-  - 4
+  - 0.5
+  - 0.5
+  - 0.5
+  - 0.5
+  - 0.5
   _upgradeCostPerLevel: 0a000000140000003200000064000000fa000000
