@@ -125,17 +125,14 @@ public class VoxelChunkManager : MonoBehaviour
     public void OreGroundInitialize(OreMineable oreMinable, int index)
     {
         _index++;
-        Debug.Log($"aaaa {_index}, {index}");
         _oreInstances[index] = oreMinable;
         Vector3 center = oreMinable.Center;
         float radius = oreMinable.Radius;
         HashSet<Vector3Int> affectedChunks = GetAffectedChunks(center, radius);
-        Debug.Log($"affectedChunks{affectedChunks.Count}");
 
         foreach (Vector3Int chunkPos in affectedChunks)
             if (_chunkDict.TryGetValue(chunkPos, out VoxelChunk chunk))
             {
-                Debug.Log("XSASSDA");
                 chunk.OreGroundInitialize(WorldPosToLocalChunkPos(center, chunkPos), radius, index);
                 if (!_oreToChunkList.TryGetValue(index, out _))
                     _oreToChunkList[index] = new List<Vector3Int>();

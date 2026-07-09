@@ -70,7 +70,7 @@ public class MiningTool : MonoBehaviour
     {
         Quaternion startRotation = _transform.localRotation;
         Quaternion endRotation = startRotation * Quaternion.Euler(0, angleDegrees, 0);
-        Debug.Log("Start TurnCoroutine");
+
 
         float elapsed = 0f;
         while (elapsed < duration)
@@ -78,7 +78,7 @@ public class MiningTool : MonoBehaviour
             elapsed += Time.deltaTime;
             float t = Mathf.Clamp01(elapsed / duration);
             _transform.localRotation = Quaternion.Slerp(startRotation, endRotation, t);
-            Debug.Log($"t = {t}, localRotation = {_transform.localRotation.eulerAngles}");
+
             yield return null;
         }
         _transform.localRotation = endRotation;
@@ -105,16 +105,13 @@ public class MiningTool : MonoBehaviour
         {
             if (hit.collider.TryGetComponent<IMinable>(out var mineable))
             {
-                //mineable.ApplyStabilityDamage(stabilityDamage);
-                //mineable.ApplyDurabilityDamage(destructionDamage, hit.point, ray.direction.normalized);
-                //Debug.Log($"{nameof(destructionDamage)} = {destructionDamage}");
-                //Debug.Log($"{nameof(stabilityDamage)} = {stabilityDamage}");
+                // TO DO
+                // Add some kind of feedback to the player when mining, like a sound or particle effect
             }
             if (hit.collider.TryGetComponent<IVoxelDamageable>(out var voxelDamageable))
             {
                 voxelDamageable.ApplyVoxelDamage(hit.point, _stats.MiningToolRadius, stabilityDamage, destructionDamage);
-                Debug.Log($"Mesh {nameof(destructionDamage)} = {destructionDamage}");
-                Debug.Log($"Mesh {nameof(stabilityDamage)} = {stabilityDamage}");
+
             }
         }
     }

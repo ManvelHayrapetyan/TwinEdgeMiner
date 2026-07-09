@@ -69,7 +69,6 @@ public class PlayerAndToolStats
 
     public int UpgradeCost(int currentLevel)
     {
-        UnityEngine.Debug.Log(currentLevel);
         return _upgradeSO.UpgradeCostPerLevel[currentLevel];
     }
 

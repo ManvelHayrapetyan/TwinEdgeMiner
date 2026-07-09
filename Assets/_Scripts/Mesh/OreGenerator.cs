@@ -16,7 +16,6 @@ public class OreGenerator : MonoBehaviour
 
         for (int i = 0; i < _oreCount; i++)
         {
-            Debug.Log($"dzera arnum {i}");
             _index++;
             Vector3 randomOffset = new Vector3(
                 Random.Range(0, _spawnRadius),

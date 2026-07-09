@@ -81,7 +81,6 @@ public class OreMineable : MonoBehaviour, IMinable, IPickable
             _canBePicked = true;
             _rb.isKinematic = false;
         }
-        Debug.Log($"OreDamageResult: {oreDamageResult}, Stability: {_stability}, Durability: {_durability}");
 
         return oreDamageResult;
     }

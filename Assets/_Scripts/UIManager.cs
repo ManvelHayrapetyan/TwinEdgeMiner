@@ -51,17 +51,15 @@ public class UIManager : MonoBehaviour
 
     public void TryCloseCurrent()
     {
-        Debug.Log("TryCloseCurrent called");
         if (_currentUI != null && _currentUI.IsOpen)
         {
             _currentUI.Close();
             _currentUI = null;
             _inputService.SwitchToGameplay();
-            Debug.Log("TryCloseCurrent called 1");
+
         }
         else
         {
-            Debug.Log("TryCloseCurrent called 2");
             // TODO: Open pause menu
         }
     }
