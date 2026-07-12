@@ -1,11 +1,10 @@
-using System.Linq;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
-
 
 public class VoxelChunk : IVoxelData
 {
@@ -27,6 +26,7 @@ public class VoxelChunk : IVoxelData
 
     private const float IsoLevel = 0.5f;
 
+    // Per-voxel state. Density drives mesh, ore index redirects damage to OreMineable.
     private NativeArray<float> voxelArray;
     private NativeArray<float> durabilityArray;
     private NativeArray<float> stabilityArray;
@@ -72,9 +72,12 @@ public class VoxelChunk : IVoxelData
     {
         stabilityArray[GetFlatIndex(x, y, z)] = stability;
     }
-    public int[] ApplyDamage(Vector3 worldPosition, float radius, float stabilityDamage, float durabilityDamage)
+
+    // Damages ground voxels in this chunk and reports ore ids touched by the hit.
+    public bool ApplyDamage(Vector3 worldPosition, float radius, float stabilityDamage, float durabilityDamage, HashSet<int> oreIndexes)
     {
         NativeQueue<int> oreQueue = new(Allocator.TempJob);
+        NativeArray<int> hasDensityChanges = new(1, Allocator.TempJob);
 
         var job = new ApplyDamageJob
         {
@@ -93,17 +96,22 @@ public class VoxelChunk : IVoxelData
             StabilityDamage = stabilityDamage,
             DurabilityDamage = durabilityDamage,
 
-            FoundOreIndexes = oreQueue.AsParallelWriter()
+            FoundOreIndexes = oreQueue.AsParallelWriter(),
+            HasDensityChanges = hasDensityChanges
         };
 
         JobHandle handle = job.Schedule(voxelArray.Length, 64);
         handle.Complete();
 
         var tmp = oreQueue.ToArray(Allocator.Temp);
-        int[] returnArray = tmp.Distinct().ToArray();
+        for (int i = 0; i < tmp.Length; i++)
+            oreIndexes.Add(tmp[i]);
+
+        bool densityChanged = hasDensityChanges[0] != 0;
         tmp.Dispose();
+        hasDensityChanges.Dispose();
         oreQueue.Dispose();
-        return returnArray;
+        return densityChanged;
     }
 
     [BurstCompile]
@@ -124,34 +132,29 @@ public class VoxelChunk : IVoxelData
         [ReadOnly] public float StabilityDamage;
         [ReadOnly] public float DurabilityDamage;
 
-        // Output: unique ore indexes found. We'll push occurrences; caller can dedupe.
-        //public NativeHashSet<int> FoundOreIndexes; // must be created with Allocator.TempJob
         public NativeQueue<int>.ParallelWriter FoundOreIndexes;
+        [NativeDisableParallelForRestriction] public NativeArray<int> HasDensityChanges;
 
         public void Execute(int index)
         {
-            // read scalar (value)
             float val = Data[index];
             if (val < 0.5f) return;
 
             float dur = Durability[index];
             if (dur <= 0f) return;
 
-            // index is 1D index of voxel index
-            // compute x,y,z if necessary (we'll compute center)
             int z = index / (VoxelsPerChunk * VoxelsPerChunk);
             int rem = index - z * VoxelsPerChunk * VoxelsPerChunk;
             int y = rem / VoxelsPerChunk;
             int x = rem % VoxelsPerChunk;
 
-
-            // compute voxel center in voxel cords (x+0.5 etc)
             float3 voxelCenter = new float3(x + 0.5f, y + 0.5f, z + 0.5f);
             float3 delta = voxelCenter - LocalPosVox;
             float distanceSq = math.lengthsq(delta);
 
             if (distanceSq > SqrRadiusVox) return;
 
+            // Ore voxels are handled by OreMineable, not by ground durability.
             int ore = OreIndex[index];
             if (ore > 0)
             {
@@ -174,9 +177,11 @@ public class VoxelChunk : IVoxelData
 
             float normalizedDurability = dur / MaxDurability;
             Data[index] = normalizedDurability <= 0f ? 0f : 0.5f + 0.5f * normalizedDurability;
+            HasDensityChanges[0] = 1;
         }
     }
 
+    // Marks voxels covered by an ore instance so hits can route damage to that ore.
     public void OreGroundInitialize(Vector3 center, float radius, int oreTypeIndex)
     {
         var job = new OreGroundInitializeJob
@@ -225,6 +230,7 @@ public class VoxelChunk : IVoxelData
         }
     }
 
+    // Updates crack texture data only; geometry stays unchanged.
     public NativeArray<Color32> ApplyCrack(Vector3 hitPoint, Vector3 center, float stability, float maxStability, int oreTypeIndex)
     {
         var job = new ApplyCrackJob
@@ -256,6 +262,7 @@ public class VoxelChunk : IVoxelData
 
         return crackColorArray;
     }
+
     [BurstCompile]
     public struct ApplyCrackJob : IJobParallelFor
     {
@@ -337,6 +344,7 @@ public class VoxelChunk : IVoxelData
         }
     }
 
+    // Removes visible shell voxels on the hit-facing side of an ore.
     public void DestroyOreShellLayer(Vector3 hitPoint, Vector3 center, int oreTypeIndex)
     {
         var job = new DestroyOreShellLayerJob
@@ -391,9 +399,9 @@ public class VoxelChunk : IVoxelData
                 Data[index] = 0f;
             }
         }
-
     }
 
+    // Final ore destruction clears every voxel belonging to that ore id.
     public void DestroyAllOreVoxels(int oreTypeIndex)
     {
         var job = new DestroyAllOreVoxelsJob
@@ -450,14 +458,4 @@ public class VoxelChunk : IVoxelData
         Padding.DisposeAll();
     }
 }
-
-
-
-
-
-
-
-
-
-
 

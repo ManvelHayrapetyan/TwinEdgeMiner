@@ -24,6 +24,7 @@ public class VoxelChunkPadding
             _paddedDensityNext[i] = 0f;
     }
 
+    // Full rebuild path used during chunk initialization.
     public void CopyDensityBlockFrom(
         NativeArray<float> sourceDensity,
         int sourceVoxelsPerChunk,
@@ -54,6 +55,36 @@ public class VoxelChunkPadding
             }
     }
 
+    // Runtime fast path: patch only the copied block in the active padding buffer.
+    public void CopyDensityBlockToCurrent(
+        NativeArray<float> sourceDensity,
+        int sourceVoxelsPerChunk,
+        int sourceStartX,
+        int sourceStartY,
+        int sourceStartZ,
+        int destinationStartX,
+        int destinationStartY,
+        int destinationStartZ,
+        int sizeX,
+        int sizeY,
+        int sizeZ)
+    {
+        for (int z = 0; z < sizeZ; z++)
+            for (int y = 0; y < sizeY; y++)
+            {
+                int sourceIndex =
+                    sourceStartX +
+                    (sourceStartY + y) * sourceVoxelsPerChunk +
+                    (sourceStartZ + z) * sourceVoxelsPerChunk * sourceVoxelsPerChunk;
+
+                int destinationIndex =
+                    destinationStartX +
+                    (destinationStartY + y) * PaddedSize +
+                    (destinationStartZ + z) * PaddedSize * PaddedSize;
+
+                NativeArray<float>.Copy(sourceDensity, sourceIndex, _paddedDensityCurrent, destinationIndex, sizeX);
+            }
+    }
 
     public void SwapAll()
     {

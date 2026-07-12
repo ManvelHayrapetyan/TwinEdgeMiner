@@ -1,4 +1,5 @@
-﻿public static class MarchingTableBurst
+// Lookup tables for marching cubes. Keep as flat arrays so Burst jobs can read them cheaply.
+public static class MarchingTableBurst
 {
 
     public static readonly int[] VertexOffset = new int[]
@@ -301,3 +302,4 @@
         -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
     };
 }
+

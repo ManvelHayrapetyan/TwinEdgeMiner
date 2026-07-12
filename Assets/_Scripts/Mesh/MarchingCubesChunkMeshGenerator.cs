@@ -8,7 +8,6 @@ using UnityEngine.Rendering;
 public class MarchingCubesChunkMeshGenerator
 {
     private static readonly Unity.Profiling.ProfilerMarker GenerateMeshMarker = new("Voxel.Mesh.GenerateMesh");
-    private static readonly Unity.Profiling.ProfilerMarker ClearBuffersMarker = new("Voxel.Mesh.ClearBuffers");
     private static readonly Unity.Profiling.ProfilerMarker MarchCubeCompleteMarker = new("Voxel.Mesh.MarchCubeJobComplete");
     private static readonly Unity.Profiling.ProfilerMarker CompactMeshMarker = new("Voxel.Mesh.CompactMeshData");
     private static readonly Unity.Profiling.ProfilerMarker UploadMeshMarker = new("Voxel.Mesh.UploadMeshData");
@@ -17,6 +16,7 @@ public class MarchingCubesChunkMeshGenerator
     private readonly int _maxVertices;
     private readonly int _voxelCount;
     private readonly int _jobCount;
+    // Persistent scratch buffers avoid allocating while mining.
     private NativeArray<float3> vertices;
     private NativeArray<ushort> triangles;
     private NativeArray<float3> normals;
@@ -26,6 +26,7 @@ public class MarchingCubesChunkMeshGenerator
     private NativeArray<float3> edgeVertices;
 
     private NativeArray<int> hasSurface;
+    private NativeArray<int> triangleCounts;
 
     private Mesh mesh;
 
@@ -43,6 +44,7 @@ public class MarchingCubesChunkMeshGenerator
         edgeVertices = new NativeArray<float3>(12 * _voxelCount, Allocator.Persistent);
 
         hasSurface = new NativeArray<int>(1, Allocator.Persistent);
+        triangleCounts = new NativeArray<int>(_voxelCount, Allocator.Persistent);
     }
 
     public Mesh GenerateMesh(VoxelChunk chunk)
@@ -51,13 +53,7 @@ public class MarchingCubesChunkMeshGenerator
 
         hasSurface[0] = 0;
 
-        using (ClearBuffersMarker.Auto())
-        {
-            vertices.FillArray(float3.zero);
-            normals.FillArray(float3.zero);
-            triangles.FillArray(default);
-        }
-
+        // The job writes sparse triangle data at fixed per-voxel offsets.
         var job = new MarchCubeJob
         {
             VoxelsPerChunk = chunk.VoxelsPerChunk,
@@ -76,6 +72,7 @@ public class MarchingCubesChunkMeshGenerator
             EdgeVertices = edgeVertices,
 
             HasSurface = hasSurface,
+            TriangleCounts = triangleCounts,
         };
 
         JobHandle handle = job.Schedule(_voxelCount, _jobCount);
@@ -89,38 +86,31 @@ public class MarchingCubesChunkMeshGenerator
 
         int writeIndex = 0;
 
+        // Compact sparse job output into the front of the buffers before uploading.
         using (CompactMeshMarker.Auto())
         {
-            for (int i = 0; i < _maxVertices; i += 3)
+            for (int voxelIndex = 0; voxelIndex < _voxelCount; voxelIndex++)
             {
-                float3 v0 = vertices[i];
-                float3 v1 = vertices[i + 1];
-                float3 v2 = vertices[i + 2];
-
-                if (v0.Equals(float3.zero) &&
-                    v1.Equals(float3.zero) &&
-                    v2.Equals(float3.zero))
+                int triangleVertexCount = triangleCounts[voxelIndex];
+                if (triangleVertexCount == 0)
                     continue;
 
-                vertices[writeIndex] = v0;
-                vertices[writeIndex + 1] = v1;
-                vertices[writeIndex + 2] = v2;
-
-                triangles[writeIndex] = (ushort)writeIndex;
-                triangles[writeIndex + 1] = (ushort)(writeIndex + 1);
-                triangles[writeIndex + 2] = (ushort)(writeIndex + 2);
-
-                normals[writeIndex] = normals[i];
-                normals[writeIndex + 1] = normals[i + 1];
-                normals[writeIndex + 2] = normals[i + 2];
-
-                writeIndex += 3;
+                int sourceIndex = voxelIndex * 15;
+                for (int i = 0; i < triangleVertexCount; i++)
+                {
+                    vertices[writeIndex] = vertices[sourceIndex + i];
+                    normals[writeIndex] = normals[sourceIndex + i];
+                    triangles[writeIndex] = (ushort)writeIndex;
+                    writeIndex++;
+                }
             }
         }
 
         using (UploadMeshMarker.Auto())
         {
-            mesh = new Mesh();
+            // Reuse the Mesh object; only its buffers change between remeshes.
+            mesh ??= new Mesh();
+            mesh.Clear();
 
             mesh.SetVertexBufferParams(
                 writeIndex,
@@ -148,6 +138,7 @@ public class MarchingCubesChunkMeshGenerator
 
         return mesh;
     }
+
     [BurstCompile]
     public struct MarchCubeJob : IJobParallelFor
     {
@@ -167,9 +158,11 @@ public class MarchingCubesChunkMeshGenerator
         [NativeDisableParallelForRestriction] public NativeArray<float3> EdgeVertices;
 
         [NativeDisableParallelForRestriction] public NativeArray<int> HasSurface;
+        [NativeDisableParallelForRestriction] public NativeArray<int> TriangleCounts;
 
         public void Execute(int index)
         {
+            TriangleCounts[index] = 0;
             int offset8 = index * 8;
             int offset12 = index * 12;
 
@@ -188,6 +181,7 @@ public class MarchingCubesChunkMeshGenerator
                 CubePositions[offset8 + i] = new float3(xi, yi, zi);
             }
 
+            // Cube index is the 8-bit marching-cubes case mask.
             int cubeIndex = 0;
             for (int i = 0; i < 8; i++)
             {
@@ -215,6 +209,7 @@ public class MarchingCubesChunkMeshGenerator
                 }
             }
 
+            // Each voxel can emit up to 5 triangles / 15 vertices.
             for (int i = 0; MarchingTableBurst.TriangleConnectionTable[cubeIndex * 16 + i] != -1; i += 3)
             {
                 int index0 = MarchingTableBurst.TriangleConnectionTable[cubeIndex * 16 + i];
@@ -232,6 +227,8 @@ public class MarchingCubesChunkMeshGenerator
                 Normals[index * 15 + i] = CalculateNormal(EdgeVertices[offset12 + index0]);
                 Normals[index * 15 + i + 1] = CalculateNormal(EdgeVertices[offset12 + index1]);
                 Normals[index * 15 + i + 2] = CalculateNormal(EdgeVertices[offset12 + index2]);
+
+                TriangleCounts[index] = i + 3;
             }
         }
 
@@ -300,13 +297,7 @@ public class MarchingCubesChunkMeshGenerator
         if (edgeVertices.IsCreated) edgeVertices.Dispose();
 
         if (hasSurface.IsCreated) hasSurface.Dispose();
+        if (triangleCounts.IsCreated) triangleCounts.Dispose();
     }
 }
-
-
-
-
-
-
-
 

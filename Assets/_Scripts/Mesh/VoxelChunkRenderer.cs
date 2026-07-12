@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Unity.Collections;
 using UnityEngine;
 
@@ -7,6 +8,8 @@ public class VoxelChunkRenderer : MonoBehaviour, IVoxelDamageable
     private static readonly Unity.Profiling.ProfilerMarker SetMeshFilterMarker = new("Voxel.Renderer.SetMeshFilter");
     private static readonly Unity.Profiling.ProfilerMarker SetMeshColliderMarker = new("Voxel.Renderer.SetMeshCollider");
     private static readonly Unity.Profiling.ProfilerMarker UpdateCrackTextureMarker = new("Voxel.Renderer.UpdateCrackTexture");
+    // MeshCollider baking is expensive, so runtime updates are spread over frames.
+    private static readonly Queue<VoxelChunkRenderer> ColliderUpdateQueue = new();
     private const int MeshGenerationJobCount = 64;
 
     private VoxelChunk _voxelChunk;
@@ -21,6 +24,7 @@ public class VoxelChunkRenderer : MonoBehaviour, IVoxelDamageable
 
     private Texture3D _crackTex;
     private Color[] _crackColors;
+    private bool _colliderUpdateQueued;
 
     private void Awake()
     {
@@ -33,7 +37,7 @@ public class VoxelChunkRenderer : MonoBehaviour, IVoxelDamageable
         _manager = GetComponentInParent<VoxelChunkManager>();
     }
 
-    public void UpdateMesh()
+    public void UpdateMesh(bool updateColliderImmediately = false)
     {
         using Unity.Profiling.ProfilerMarker.AutoScope _ = UpdateMeshMarker.Auto();
 
@@ -46,10 +50,10 @@ public class VoxelChunkRenderer : MonoBehaviour, IVoxelDamageable
                 _meshFilter.sharedMesh = null;
             }
 
-            using (SetMeshColliderMarker.Auto())
-            {
-                _meshCollider.sharedMesh = null;
-            }
+            if (updateColliderImmediately)
+                UpdateColliderMesh();
+            else
+                QueueColliderUpdate();
             return;
         }
 
@@ -58,12 +62,43 @@ public class VoxelChunkRenderer : MonoBehaviour, IVoxelDamageable
             _meshFilter.mesh = _mesh;
         }
 
+        if (updateColliderImmediately)
+            UpdateColliderMesh();
+        else
+            QueueColliderUpdate();
+    }
+
+    public static void ProcessPendingColliderUpdates(int maxUpdates)
+    {
+        for (int i = 0; i < maxUpdates && ColliderUpdateQueue.Count > 0; i++)
+        {
+            VoxelChunkRenderer renderer = ColliderUpdateQueue.Dequeue();
+            if (renderer == null)
+                continue;
+
+            renderer._colliderUpdateQueued = false;
+            renderer.UpdateColliderMesh();
+        }
+    }
+
+    private void QueueColliderUpdate()
+    {
+        if (_colliderUpdateQueued)
+            return;
+
+        _colliderUpdateQueued = true;
+        ColliderUpdateQueue.Enqueue(this);
+    }
+
+    private void UpdateColliderMesh()
+    {
         using (SetMeshColliderMarker.Auto())
         {
             _meshCollider.sharedMesh = null;
             _meshCollider.sharedMesh = _mesh;
         }
     }
+
     public void Init(VoxelChunk voxelChunk)
     {
         _voxelChunk = voxelChunk;
@@ -109,11 +144,4 @@ public class VoxelChunkRenderer : MonoBehaviour, IVoxelDamageable
         _meshGenerator?.Dispose();
     }
 }
-
-
-
-
-
-
-
 

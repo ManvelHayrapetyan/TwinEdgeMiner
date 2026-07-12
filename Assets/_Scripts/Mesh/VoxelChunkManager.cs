@@ -11,7 +11,6 @@ public class VoxelChunkManager : MonoBehaviour
     private static readonly Unity.Profiling.ProfilerMarker OreDamageMarker = new("Voxel.Manager.OreDamage");
     private static readonly Unity.Profiling.ProfilerMarker GetUpdateChunksMarker = new("Voxel.Manager.GetUpdateChunks");
     private static readonly Unity.Profiling.ProfilerMarker PaddingUpdateMarker = new("Voxel.Manager.PaddingUpdate");
-    private static readonly Unity.Profiling.ProfilerMarker PaddingSwapMarker = new("Voxel.Manager.PaddingSwap");
     private static readonly Unity.Profiling.ProfilerMarker UpdateChunksMarker = new("Voxel.Manager.UpdateChunks");
     private static readonly Unity.Profiling.ProfilerMarker FillPaddedDensityMarker = new("Voxel.Manager.FillPaddedDensity");
     [SerializeField] private int _chunkCountX = 8;
@@ -23,20 +22,26 @@ public class VoxelChunkManager : MonoBehaviour
     [SerializeField] private float _maxDurability = 40f;
     [SerializeField] private float _alpha = 30f;
     [SerializeField] private GameObject _chunkPrefab;
+    [SerializeField, Min(0)] private int _maxColliderUpdatesPerFrame = 2;
 
-    private int _index = 0;
     private Vector3 _chunkWorldSize;
 
     private readonly Dictionary<Vector3Int, VoxelChunk> _chunkDict = new();
     private readonly Dictionary<Vector3Int, VoxelChunkRenderer> _chunkRendererDict = new();
     private readonly Dictionary<int, List<Vector3Int>> _oreToChunkList = new();
     private readonly Dictionary<int, OreMineable> _oreInstances = new();
+
     private void Awake()
     {
-        _chunkWorldSize = Vector3.one * _voxelsPerChunk * _voxelSize;
+        _chunkWorldSize = _voxelSize * _voxelsPerChunk * Vector3.one;
         CreateChunks();
     }
 
+    private void Update()
+    {
+        // Spread MeshCollider baking across frames instead of the hit frame.
+        VoxelChunkRenderer.ProcessPendingColliderUpdates(_maxColliderUpdatesPerFrame);
+    }
 
     public void ApplyDamage(Vector3 worldPosition, float radius, float stabilityDamage, float durabilityDamage)
     {
@@ -48,26 +53,34 @@ public class VoxelChunkManager : MonoBehaviour
             affectedChunks = GetAffectedChunks(worldPosition, radius);
         }
 
-        HashSet<Vector3Int> affectedOreChunks = new();
+        // geometryChangedChunks changed density; chunksToUpdate also includes needed border neighbors.
+        HashSet<Vector3Int> geometryChangedChunks = new();
         HashSet<int> oreUniqueIndexes = new();
         Dictionary<Vector3Int, NativeArray<Color32>> indexToColor = new();
+        HashSet<Vector3Int> chunksToUpdate = new();
 
+        // First pass damages regular ground voxels and collects touched ore ids.
         using (ChunkDamageJobsMarker.Auto())
         {
             foreach (Vector3Int chunkPos in affectedChunks)
             {
                 if (_chunkDict.TryGetValue(chunkPos, out VoxelChunk chunk))
                 {
-                    int[] oreIndexes = chunk.ApplyDamage(
+                    bool densityChanged = chunk.ApplyDamage(
                         WorldPosToLocalChunkPos(worldPosition, chunkPos),
-                        radius, stabilityDamage, durabilityDamage);
+                        radius, stabilityDamage, durabilityDamage,
+                        oreUniqueIndexes);
 
-                    foreach (int index in oreIndexes)
-                        oreUniqueIndexes.Add(index);
+                    if (densityChanged)
+                    {
+                        geometryChangedChunks.Add(chunkPos);
+                        AddChunkAndBoundaryNeighbors(chunksToUpdate, chunkPos, WorldPosToLocalChunkPos(worldPosition, chunkPos), radius);
+                    }
                 }
             }
         }
 
+        // Ore can update only crack texture, or destroy ore voxels and require remesh.
         using (OreDamageMarker.Auto())
         {
             foreach (int oreIndex in oreUniqueIndexes)
@@ -89,7 +102,6 @@ public class VoxelChunkManager : MonoBehaviour
                                 _oreInstances[oreIndex].Stability,
                                 _oreInstances[oreIndex].MaxStability,
                                 oreIndex);
-                            affectedOreChunks.Add(chunkIndex);
                             break;
 
                         case OreDamageResult.LayerDestroyed:
@@ -97,62 +109,60 @@ public class VoxelChunkManager : MonoBehaviour
                                 WorldPosToLocalChunkPos(worldPosition, chunkIndex),
                                 WorldPosToLocalChunkPos(_oreInstances[oreIndex].Center, chunkIndex),
                                 oreIndex);
-                            affectedOreChunks.Add(chunkIndex);
+                            geometryChangedChunks.Add(chunkIndex);
+                            AddChunkAndAllNeighbors(chunksToUpdate, chunkIndex);
                             break;
 
                         case OreDamageResult.FullyMined:
                             _chunkDict[chunkIndex].DestroyAllOreVoxels(oreIndex);
-                            affectedOreChunks.Add(chunkIndex);
+                            geometryChangedChunks.Add(chunkIndex);
+                            AddChunkAndAllNeighbors(chunksToUpdate, chunkIndex);
                             break;
                     }
                 }
             }
         }
-
-        affectedChunks.UnionWith(affectedOreChunks);
-
-        HashSet<Vector3Int> chunksToUpdate;
         using (GetUpdateChunksMarker.Auto())
         {
-            chunksToUpdate = GetAffectedChunksWithNeighbors(affectedChunks);
+            foreach (Vector3Int chunkIndex in geometryChangedChunks)
+                TryAddChunk(chunksToUpdate, chunkIndex);
         }
 
+        // Patch padding before remesh so border normals/surfaces see fresh neighbor density.
         using (PaddingUpdateMarker.Auto())
         {
-            foreach (var chunkToUpdate in chunksToUpdate)
-                ChunkNeighborsPaddingSet(chunkToUpdate);
-        }
-
-        using (PaddingSwapMarker.Auto())
-        {
-            foreach (Vector3Int chunkToUpdate in chunksToUpdate)
-                _chunkDict[chunkToUpdate].Padding.SwapAll();
+            UpdatePaddingFromChangedChunks(geometryChangedChunks, chunksToUpdate);
         }
 
         using (UpdateChunksMarker.Auto())
         {
-            UpdateChunks(chunksToUpdate, indexToColor);
+            UpdateChunks(chunksToUpdate);
+            UpdateCrackTextures(indexToColor);
         }
     }
+
     private Vector3 WorldPosToLocalChunkPos(Vector3 WorldPos, Vector3Int index)
     {
         return WorldPos - transform.position - Vector3.Scale((Vector3)index, _chunkWorldSize);
     }
 
-    private void UpdateChunks(IEnumerable<Vector3Int> indexes, Dictionary<Vector3Int, NativeArray<Color32>> indexToColor)
+    private void UpdateChunks(IEnumerable<Vector3Int> indexes)
     {
         foreach (Vector3Int index in indexes)
         {
             _chunkRendererDict[index].UpdateGO(_chunkDict[index]);
             _chunkRendererDict[index].UpdateMesh();
-            if (indexToColor.TryGetValue(index, out NativeArray<Color32> color))
-                _chunkRendererDict[index].UpdateGO(_chunkDict[index], color);
         }
+    }
+
+    private void UpdateCrackTextures(Dictionary<Vector3Int, NativeArray<Color32>> indexToColor)
+    {
+        foreach (KeyValuePair<Vector3Int, NativeArray<Color32>> entry in indexToColor)
+            _chunkRendererDict[entry.Key].UpdateGO(_chunkDict[entry.Key], entry.Value);
     }
 
     public void OreGroundInitialize(OreMineable oreMinable, int index)
     {
-        _index++;
         _oreInstances[index] = oreMinable;
         Vector3 center = oreMinable.Center;
         float radius = oreMinable.Radius;
@@ -209,7 +219,6 @@ public class VoxelChunkManager : MonoBehaviour
                     Vector3Int chunkPos = new(x, y, z);
                     Vector3 worldPos = Vector3.Scale(chunkPos, _chunkWorldSize);
 
-
                     GameObject go = Instantiate(_chunkPrefab, transform.position + worldPos, Quaternion.identity, transform);
                     go.name = $"Chunk_{x}_{y}_{z}";
                     VoxelChunkRenderer chunkRenderer = go.GetComponent<VoxelChunkRenderer>();
@@ -245,7 +254,6 @@ public class VoxelChunkManager : MonoBehaviour
                     ChunkNeighborsPaddingSet(new Vector3Int(x, y, z));
                 }
 
-
         for (int x = 0; x < _chunkCountX; x++)
             for (int y = 0; y < _chunkCountY; y++)
                 for (int z = 0; z < _chunkCountZ; z++)
@@ -253,10 +261,50 @@ public class VoxelChunkManager : MonoBehaviour
                     if (_chunkDict.TryGetValue(new Vector3Int(x, y, z), out VoxelChunk chunk))
                     {
                         _chunkRendererDict[new Vector3Int(x, y, z)].Init(_chunkDict[new Vector3Int(x, y, z)]);
-                        _chunkRendererDict[new Vector3Int(x, y, z)].UpdateMesh();
+                        _chunkRendererDict[new Vector3Int(x, y, z)].UpdateMesh(true);
 
                     }
                 }
+    }
+
+    // Runtime fast path: only copy changed chunks into the padding of chunks being remeshed.
+    private void UpdatePaddingFromChangedChunks(HashSet<Vector3Int> geometryChangedChunks, HashSet<Vector3Int> chunksToUpdate)
+    {
+        foreach (Vector3Int targetChunkID in chunksToUpdate)
+        {
+            if (!_chunkDict.TryGetValue(targetChunkID, out VoxelChunk targetChunk))
+                continue;
+
+            VoxelChunkPadding padding = targetChunk.Padding;
+            int paddingSize = padding.PaddingSize;
+
+            foreach (Vector3Int sourceChunkID in geometryChangedChunks)
+            {
+                Vector3Int offset = sourceChunkID - targetChunkID;
+                if (Mathf.Abs(offset.x) > 1 || Mathf.Abs(offset.y) > 1 || Mathf.Abs(offset.z) > 1)
+                    continue;
+
+                if (!_chunkDict.TryGetValue(sourceChunkID, out VoxelChunk sourceChunk))
+                    continue;
+
+                GetPaddingCopyRange(offset.x, paddingSize, out int sourceStartX, out int destinationStartX, out int sizeX);
+                GetPaddingCopyRange(offset.y, paddingSize, out int sourceStartY, out int destinationStartY, out int sizeY);
+                GetPaddingCopyRange(offset.z, paddingSize, out int sourceStartZ, out int destinationStartZ, out int sizeZ);
+
+                padding.CopyDensityBlockToCurrent(
+                    sourceChunk.Dencity,
+                    _voxelsPerChunk,
+                    sourceStartX,
+                    sourceStartY,
+                    sourceStartZ,
+                    destinationStartX,
+                    destinationStartY,
+                    destinationStartZ,
+                    sizeX,
+                    sizeY,
+                    sizeZ);
+            }
+        }
     }
 
     private void ChunkNeighborsPaddingSet(Vector3Int chunkID)
@@ -341,24 +389,46 @@ public class VoxelChunkManager : MonoBehaviour
                 }
     }
 
-    private HashSet<Vector3Int> GetAffectedChunksWithNeighbors(HashSet<Vector3Int> affectedChunks)
+    // Regular hits remesh neighbors only when the damage sphere reaches a chunk border.
+    private void AddChunkAndBoundaryNeighbors(HashSet<Vector3Int> chunks, Vector3Int chunkID, Vector3 localHitPosition, float radius)
     {
-        HashSet<Vector3Int> result = new(affectedChunks);
+        TryAddChunk(chunks, chunkID);
 
-        foreach (Vector3Int chunkID in affectedChunks)
-        {
-            for (int x = -1; x <= 1; x++)
-                for (int y = -1; y <= 1; y++)
-                    for (int z = -1; z <= 1; z++)
-                    {
-                        if (x == 0 && y == 0 && z == 0)
-                            continue;
+        int paddingSize = _chunkDict[chunkID].Padding.PaddingSize;
+        float paddingWorldSize = paddingSize * _voxelSize;
 
-                        TryAddChunk(result, chunkID + new Vector3Int(x, y, z));
-                    }
-        }
+        int minX = localHitPosition.x - radius <= paddingWorldSize ? -1 : 0;
+        int maxX = localHitPosition.x + radius >= _chunkWorldSize.x - paddingWorldSize ? 1 : 0;
+        int minY = localHitPosition.y - radius <= paddingWorldSize ? -1 : 0;
+        int maxY = localHitPosition.y + radius >= _chunkWorldSize.y - paddingWorldSize ? 1 : 0;
+        int minZ = localHitPosition.z - radius <= paddingWorldSize ? -1 : 0;
+        int maxZ = localHitPosition.z + radius >= _chunkWorldSize.z - paddingWorldSize ? 1 : 0;
 
-        return result;
+        for (int x = minX; x <= maxX; x++)
+            for (int y = minY; y <= maxY; y++)
+                for (int z = minZ; z <= maxZ; z++)
+                {
+                    if (x == 0 && y == 0 && z == 0)
+                        continue;
+
+                    TryAddChunk(chunks, chunkID + new Vector3Int(x, y, z));
+                }
+    }
+
+    // Ore shell removal can expose wider borders, so keep the conservative neighbor set.
+    private void AddChunkAndAllNeighbors(HashSet<Vector3Int> chunks, Vector3Int chunkID)
+    {
+        TryAddChunk(chunks, chunkID);
+
+        for (int x = -1; x <= 1; x++)
+            for (int y = -1; y <= 1; y++)
+                for (int z = -1; z <= 1; z++)
+                {
+                    if (x == 0 && y == 0 && z == 0)
+                        continue;
+
+                    TryAddChunk(chunks, chunkID + new Vector3Int(x, y, z));
+                }
     }
 
     private void TryAddChunk(HashSet<Vector3Int> chunks, Vector3Int chunkID)
@@ -367,19 +437,4 @@ public class VoxelChunkManager : MonoBehaviour
             chunks.Add(chunkID);
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

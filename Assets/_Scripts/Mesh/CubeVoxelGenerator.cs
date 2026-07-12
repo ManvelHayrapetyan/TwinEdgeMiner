@@ -1,5 +1,6 @@
 public class CubeVoxelGenerator : IVoxelGenerator
 {
+    // Starts a chunk as solid ground with full stability and durability.
     public void Fill(IVoxelData voxelData)
     {
         for (int x = 0; x < voxelData.VoxelsPerChunk; x++)
@@ -12,4 +13,3 @@ public class CubeVoxelGenerator : IVoxelGenerator
                 }
     }
 }
-

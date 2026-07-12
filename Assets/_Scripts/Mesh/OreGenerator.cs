@@ -1,31 +1,26 @@
 using UnityEngine;
-using Zenject;
 
 public class OreGenerator : MonoBehaviour
 {
     [SerializeField] private GameObject _orePrefab;
     [SerializeField] private VoxelChunkManager voxelChunkManager;
-    [SerializeField] private int _oreCount = 50; 
-    [SerializeField] private float _spawnRadius = 20f; 
+    [SerializeField] private int _oreCount = 50;
+    [SerializeField] private float _spawnRadius = 20f;
+
     private int _index = 0;
+
     private void Start()
     {
-        //GameObject go = Instantiate(_orePrefab, transform.position, Quaternion.identity, transform);
-        //OreMineable oreMinable = go.GetComponent<OreMineable>();
-        //voxelChunkManager.OreGroundInitialize(oreMinable, _index);
-
+        // Each spawned ore registers its occupied voxels in the voxel chunks.
         for (int i = 0; i < _oreCount; i++)
         {
             _index++;
-            Vector3 randomOffset = new Vector3(
+            Vector3 randomOffset = new(
                 Random.Range(0, _spawnRadius),
                 Random.Range(0, _spawnRadius),
-                Random.Range(0, _spawnRadius)
-            );
+                Random.Range(0, _spawnRadius));
 
-            Vector3 spawnPos = transform.position + randomOffset;
-
-            GameObject go = Instantiate(_orePrefab, spawnPos, Quaternion.identity, transform);
+            GameObject go = Instantiate(_orePrefab, transform.position + randomOffset, Quaternion.identity, transform);
             OreMineable oreMinable = go.GetComponent<OreMineable>();
             voxelChunkManager.OreGroundInitialize(oreMinable, _index);
         }
