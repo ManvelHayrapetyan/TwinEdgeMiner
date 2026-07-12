@@ -20,6 +20,7 @@ public class MarchingCubesChunkMeshGenerator
     private NativeArray<float3> vertices;
     private NativeArray<ushort> triangles;
     private NativeArray<float3> normals;
+    private NativeArray<float4> tangents;
 
     private NativeArray<float> cubeValues;
     private NativeArray<float3> cubePositions;
@@ -38,6 +39,7 @@ public class MarchingCubesChunkMeshGenerator
         vertices = new NativeArray<float3>(_maxVertices, Allocator.Persistent);
         triangles = new NativeArray<ushort>(_maxVertices, Allocator.Persistent);
         normals = new NativeArray<float3>(_maxVertices, Allocator.Persistent);
+        tangents = new NativeArray<float4>(_maxVertices, Allocator.Persistent);
 
         cubeValues = new NativeArray<float>(8 * _voxelCount, Allocator.Persistent);
         cubePositions = new NativeArray<float3>(8 * _voxelCount, Allocator.Persistent);
@@ -66,6 +68,7 @@ public class MarchingCubesChunkMeshGenerator
             Vertices = vertices,
             Triangles = triangles,
             Normals = normals,
+            Tangents = tangents,
 
             CubeValues = cubeValues,
             CubePositions = cubePositions,
@@ -100,6 +103,7 @@ public class MarchingCubesChunkMeshGenerator
                 {
                     vertices[writeIndex] = vertices[sourceIndex + i];
                     normals[writeIndex] = normals[sourceIndex + i];
+                    tangents[writeIndex] = tangents[sourceIndex + i];
                     triangles[writeIndex] = (ushort)writeIndex;
                     writeIndex++;
                 }
@@ -130,6 +134,7 @@ public class MarchingCubesChunkMeshGenerator
             mesh.SetIndexBufferData(triangles, 0, 0, writeIndex, MeshUpdateFlags.DontValidateIndices);
             mesh.SetSubMesh(0, new SubMeshDescriptor(0, writeIndex, MeshTopology.Triangles), MeshUpdateFlags.DontValidateIndices);
             mesh.SetNormals(normals, 0, writeIndex);
+            mesh.SetTangents(tangents, 0, writeIndex);
 
             Vector3 center = Vector3.one * chunk.VoxelsPerChunk * chunk.VoxelSize * 0.5f;
             Vector3 boundsSize = Vector3.one * chunk.VoxelsPerChunk * chunk.VoxelSize;
@@ -152,6 +157,7 @@ public class MarchingCubesChunkMeshGenerator
         [NativeDisableParallelForRestriction] public NativeArray<float3> Vertices;
         [NativeDisableParallelForRestriction] public NativeArray<ushort> Triangles;
         [NativeDisableParallelForRestriction] public NativeArray<float3> Normals;
+        [NativeDisableParallelForRestriction] public NativeArray<float4> Tangents;
 
         [NativeDisableParallelForRestriction] public NativeArray<float> CubeValues;
         [NativeDisableParallelForRestriction] public NativeArray<float3> CubePositions;
@@ -216,17 +222,29 @@ public class MarchingCubesChunkMeshGenerator
                 int index1 = MarchingTableBurst.TriangleConnectionTable[cubeIndex * 16 + i + 1];
                 int index2 = MarchingTableBurst.TriangleConnectionTable[cubeIndex * 16 + i + 2];
 
-                Vertices[index * 15 + i] = EdgeVertices[offset12 + index0] * VoxelSize;
-                Vertices[index * 15 + i + 1] = EdgeVertices[offset12 + index1] * VoxelSize;
-                Vertices[index * 15 + i + 2] = EdgeVertices[offset12 + index2] * VoxelSize;
+                float3 vertex0 = EdgeVertices[offset12 + index0];
+                float3 vertex1 = EdgeVertices[offset12 + index1];
+                float3 vertex2 = EdgeVertices[offset12 + index2];
+
+                Vertices[index * 15 + i] = vertex0 * VoxelSize;
+                Vertices[index * 15 + i + 1] = vertex1 * VoxelSize;
+                Vertices[index * 15 + i + 2] = vertex2 * VoxelSize;
 
                 Triangles[index * 15 + i] = (ushort)(index * 15 + i);
                 Triangles[index * 15 + i + 1] = (ushort)(index * 15 + i + 1);
                 Triangles[index * 15 + i + 2] = (ushort)(index * 15 + i + 2);
 
-                Normals[index * 15 + i] = CalculateNormal(EdgeVertices[offset12 + index0]);
-                Normals[index * 15 + i + 1] = CalculateNormal(EdgeVertices[offset12 + index1]);
-                Normals[index * 15 + i + 2] = CalculateNormal(EdgeVertices[offset12 + index2]);
+                float3 normal0 = CalculateNormal(vertex0);
+                float3 normal1 = CalculateNormal(vertex1);
+                float3 normal2 = CalculateNormal(vertex2);
+
+                Normals[index * 15 + i] = normal0;
+                Normals[index * 15 + i + 1] = normal1;
+                Normals[index * 15 + i + 2] = normal2;
+
+                Tangents[index * 15 + i] = CalculateTangent(normal0);
+                Tangents[index * 15 + i + 1] = CalculateTangent(normal1);
+                Tangents[index * 15 + i + 2] = CalculateTangent(normal2);
 
                 TriangleCounts[index] = i + 3;
             }
@@ -262,6 +280,21 @@ public class MarchingCubesChunkMeshGenerator
             return -math.normalize(normal);
         }
 
+        private float4 CalculateTangent(float3 normal)
+        {
+            float3 helperAxis = math.abs(normal.y) < 0.999f
+                ? new float3(0, 1, 0)
+                : new float3(1, 0, 0);
+
+            float3 tangent = math.cross(helperAxis, normal);
+            float lengthSq = math.lengthsq(tangent);
+            if (!math.all(math.isfinite(tangent)) || lengthSq < 0.000001f)
+                return new float4(1, 0, 0, 1);
+
+            tangent *= math.rsqrt(lengthSq);
+            return new float4(tangent.x, tangent.y, tangent.z, 1f);
+        }
+
         private float SampleDensity(float3 pos)
         {
             int x = Mathf.RoundToInt(pos.x);
@@ -291,6 +324,7 @@ public class MarchingCubesChunkMeshGenerator
         if (vertices.IsCreated) vertices.Dispose();
         if (triangles.IsCreated) triangles.Dispose();
         if (normals.IsCreated) normals.Dispose();
+        if (tangents.IsCreated) tangents.Dispose();
 
         if (cubeValues.IsCreated) cubeValues.Dispose();
         if (cubePositions.IsCreated) cubePositions.Dispose();
