@@ -1,9 +1,6 @@
-using UnityEngine;
 public interface IVoxelData
 {
-    int Width { get; }
-    int Height { get; }
-    int Depth { get; }
+    int VoxelsPerChunk { get; }
     float VoxelSize { get; }
     float MaxStability { get; }
     float MaxDurability { get; }
@@ -11,5 +8,5 @@ public interface IVoxelData
 
     void SetDurability(int x, int y, int z, float durability);
     void SetStability(int x, int y, int z, float stability);
-    //int[] ApplyDamage(Vector3 hitPosition, float radius, float stabilityDamage, float durabilityDamage);
 }
+

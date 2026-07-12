@@ -1,66 +1,83 @@
+using Unity.Collections;
+
 public class VoxelChunkPadding
 {
-    public VoxelPaddingLayer FaceXPlus { get; private set; }
-    public VoxelPaddingLayer FaceYPlus { get; private set; }
-    public VoxelPaddingLayer FaceZPlus { get; private set; }
+    public int PaddingSize { get; }
+    public int PaddedSize { get; }
+    public NativeArray<float> PaddedDensity => _paddedDensityCurrent;
 
-    public VoxelPaddingLayer FaceXMinus { get; private set; }
-    public VoxelPaddingLayer FaceYMinus { get; private set; }
-    public VoxelPaddingLayer FaceZMinus { get; private set; }
+    private NativeArray<float> _paddedDensityCurrent;
+    private NativeArray<float> _paddedDensityNext;
 
-    public VoxelPaddingLayer EdgeXPlusYPlus { get; private set; }
-    public VoxelPaddingLayer EdgeXPlusZPlus { get; private set; }
-    public VoxelPaddingLayer EdgeYPlusZPlus { get; private set; }
-
-    public VoxelPaddingLayer CornerXPlusYPlusZPlus { get; private set; }
-
-    public VoxelChunkPadding(int width, int height, int depth)
+    public VoxelChunkPadding(int voxelsPerChunk, int paddingSize = 2)
     {
-        FaceXPlus = new VoxelPaddingLayer(height, depth);
-        FaceYPlus = new VoxelPaddingLayer(width, depth);
-        FaceZPlus = new VoxelPaddingLayer(width, height);
+        PaddingSize = paddingSize;
+        PaddedSize = voxelsPerChunk + paddingSize * 2;
 
-        FaceXMinus = new VoxelPaddingLayer(height, depth);
-        FaceYMinus = new VoxelPaddingLayer(width, depth);
-        FaceZMinus = new VoxelPaddingLayer(width, height);
-
-        EdgeXPlusYPlus = new VoxelPaddingLayer(depth, 1);
-        EdgeXPlusZPlus = new VoxelPaddingLayer(height, 1);
-        EdgeYPlusZPlus = new VoxelPaddingLayer(width, 1);
-
-        CornerXPlusYPlusZPlus = new VoxelPaddingLayer(1, 1);
+        _paddedDensityCurrent = new NativeArray<float>(PaddedSize * PaddedSize * PaddedSize, Allocator.Persistent);
+        _paddedDensityNext = new NativeArray<float>(_paddedDensityCurrent.Length, Allocator.Persistent);
     }
+
+    public void ClearNext()
+    {
+        for (int i = 0; i < _paddedDensityNext.Length; i++)
+            _paddedDensityNext[i] = 0f;
+    }
+
+    public void CopyDensityBlockFrom(
+        NativeArray<float> sourceDensity,
+        int sourceVoxelsPerChunk,
+        int sourceStartX,
+        int sourceStartY,
+        int sourceStartZ,
+        int destinationStartX,
+        int destinationStartY,
+        int destinationStartZ,
+        int sizeX,
+        int sizeY,
+        int sizeZ)
+    {
+        for (int z = 0; z < sizeZ; z++)
+            for (int y = 0; y < sizeY; y++)
+            {
+                int sourceIndex =
+                    sourceStartX +
+                    (sourceStartY + y) * sourceVoxelsPerChunk +
+                    (sourceStartZ + z) * sourceVoxelsPerChunk * sourceVoxelsPerChunk;
+
+                int destinationIndex =
+                    destinationStartX +
+                    (destinationStartY + y) * PaddedSize +
+                    (destinationStartZ + z) * PaddedSize * PaddedSize;
+
+                NativeArray<float>.Copy(sourceDensity, sourceIndex, _paddedDensityNext, destinationIndex, sizeX);
+            }
+    }
+
+
     public void SwapAll()
     {
-        FaceXPlus.Swap();
-        FaceYPlus.Swap();
-        FaceZPlus.Swap();
+        (_paddedDensityNext, _paddedDensityCurrent) = (_paddedDensityCurrent, _paddedDensityNext);
+    }
 
-        FaceXMinus.Swap();
-        FaceYMinus.Swap();
-        FaceZMinus.Swap();
+    public float GetVoxelValue(int x, int y, int z)
+    {
+        int paddedX = x + PaddingSize;
+        int paddedY = y + PaddingSize;
+        int paddedZ = z + PaddingSize;
 
-        EdgeXPlusYPlus.Swap();
-        EdgeXPlusZPlus.Swap();
-        EdgeYPlusZPlus.Swap();
+        if (paddedX < 0 || paddedX >= PaddedSize ||
+            paddedY < 0 || paddedY >= PaddedSize ||
+            paddedZ < 0 || paddedZ >= PaddedSize)
+            return 0f;
 
-        CornerXPlusYPlusZPlus.Swap();
+        return PaddedDensity[paddedX + paddedY * PaddedSize + paddedZ * PaddedSize * PaddedSize];
     }
 
     public void DisposeAll()
     {
-        FaceXPlus?.Dispose();
-        FaceYPlus?.Dispose();
-        FaceZPlus?.Dispose();
-
-        FaceXMinus?.Dispose();
-        FaceYMinus?.Dispose();
-        FaceZMinus?.Dispose();
-
-        EdgeXPlusYPlus?.Dispose();
-        EdgeXPlusZPlus?.Dispose();
-        EdgeYPlusZPlus?.Dispose();
-
-        CornerXPlusYPlusZPlus?.Dispose();
+        if (_paddedDensityCurrent.IsCreated) _paddedDensityCurrent.Dispose();
+        if (_paddedDensityNext.IsCreated) _paddedDensityNext.Dispose();
     }
 }
+

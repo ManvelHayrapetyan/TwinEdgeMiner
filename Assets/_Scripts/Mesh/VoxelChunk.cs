@@ -9,9 +9,11 @@ using UnityEngine;
 
 public class VoxelChunk : IVoxelData
 {
-    public int Width { get; }
-    public int Height { get; }
-    public int Depth { get; }
+    private static readonly Unity.Profiling.ProfilerMarker ApplyDamageMarker = new("Voxel.Chunk.ApplyDamage");
+    private static readonly Unity.Profiling.ProfilerMarker ApplyCrackMarker = new("Voxel.Chunk.ApplyCrack");
+    private static readonly Unity.Profiling.ProfilerMarker DestroyOreShellMarker = new("Voxel.Chunk.DestroyOreShellLayer");
+    private static readonly Unity.Profiling.ProfilerMarker DestroyAllOreMarker = new("Voxel.Chunk.DestroyAllOreVoxels");
+    public int VoxelsPerChunk { get; }
     public float VoxelSize { get; }
     public float MaxStability { get; }
     public float MaxDurability { get; }
@@ -36,20 +38,18 @@ public class VoxelChunk : IVoxelData
 
     private readonly CubeVoxelGenerator _cubeVoxelGenerator = new();
 
-    public VoxelChunk(int width, int height, int depth, float voxelSize, float maxStability, float maxDurability, float alpha)
+    public VoxelChunk(int voxelsPerChunk, float voxelSize, float maxStability, float maxDurability, float alpha)
     {
-        Width = width;
-        Height = height;
-        Depth = depth;
+        VoxelsPerChunk = voxelsPerChunk;
         VoxelSize = voxelSize;
         MaxStability = maxStability;
         MaxDurability = maxDurability;
 
         _alpha = alpha;
 
-        Padding = new(width, height, depth);
+        Padding = new(VoxelsPerChunk);
 
-        voxelArray = new NativeArray<float>(Width * Height * Depth, Allocator.Persistent);
+        voxelArray = new NativeArray<float>(VoxelsPerChunk * VoxelsPerChunk * VoxelsPerChunk, Allocator.Persistent);
         durabilityArray = new NativeArray<float>(voxelArray.Length, Allocator.Persistent);
         stabilityArray = new NativeArray<float>(voxelArray.Length, Allocator.Persistent);
         oreIndexArray = new NativeArray<int>(voxelArray.Length, Allocator.Persistent);
@@ -60,7 +60,7 @@ public class VoxelChunk : IVoxelData
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int GetFlatIndex(int x, int y, int z) => x + y * Width + z * Width * Height;
+    private int GetFlatIndex(int x, int y, int z) => x + y * VoxelsPerChunk + z * VoxelsPerChunk * VoxelsPerChunk;
 
     public void SetDurability(int x, int y, int z, float durability)
     {
@@ -78,9 +78,7 @@ public class VoxelChunk : IVoxelData
 
         var job = new ApplyDamageJob
         {
-            Width = Width,
-            Height = Height,
-            Depth = Depth,
+            VoxelsPerChunk = this.VoxelsPerChunk,
             MaxStability = MaxStability,
             MaxDurability = MaxDurability,
 
@@ -111,9 +109,7 @@ public class VoxelChunk : IVoxelData
     [BurstCompile]
     public struct ApplyDamageJob : IJobParallelFor
     {
-        [ReadOnly] public int Width;
-        [ReadOnly] public int Height;
-        [ReadOnly] public int Depth;
+        [ReadOnly] public int VoxelsPerChunk;
         [ReadOnly] public float MaxStability;
         [ReadOnly] public float MaxDurability;
 
@@ -141,12 +137,12 @@ public class VoxelChunk : IVoxelData
             float dur = Durability[index];
             if (dur <= 0f) return;
 
-            // index is 1D index of voxel (0..W*H*D-1)
+            // index is 1D index of voxel index
             // compute x,y,z if necessary (we'll compute center)
-            int z = index / (Width * Height);
-            int rem = index - z * Width * Height;
-            int y = rem / Width;
-            int x = rem % Width;
+            int z = index / (VoxelsPerChunk * VoxelsPerChunk);
+            int rem = index - z * VoxelsPerChunk * VoxelsPerChunk;
+            int y = rem / VoxelsPerChunk;
+            int x = rem % VoxelsPerChunk;
 
 
             // compute voxel center in voxel cords (x+0.5 etc)
@@ -185,9 +181,7 @@ public class VoxelChunk : IVoxelData
     {
         var job = new OreGroundInitializeJob
         {
-            Width = Width,
-            Height = Height,
-            Depth = Depth,
+            VoxelsPerChunk = this.VoxelsPerChunk,
             OreTypeIndex = oreTypeIndex,
 
             Data = voxelArray,
@@ -204,9 +198,7 @@ public class VoxelChunk : IVoxelData
     [BurstCompile]
     public struct OreGroundInitializeJob : IJobParallelFor
     {
-        [ReadOnly] public int Width;
-        [ReadOnly] public int Height;
-        [ReadOnly] public int Depth;
+        [ReadOnly] public int VoxelsPerChunk;
         [ReadOnly] public int OreTypeIndex;
 
         [NativeDisableParallelForRestriction] public NativeArray<float> Data;
@@ -220,10 +212,10 @@ public class VoxelChunk : IVoxelData
             float val = Data[index];
             if (val < 0.5f) return;
 
-            int z = index / (Width * Height);
-            int rem = index - z * Width * Height;
-            int y = rem / Width;
-            int x = rem % Width;
+            int z = index / (VoxelsPerChunk * VoxelsPerChunk);
+            int rem = index - z * VoxelsPerChunk * VoxelsPerChunk;
+            int y = rem / VoxelsPerChunk;
+            int x = rem % VoxelsPerChunk;
 
             float3 voxelCenter = new(x + 0.5f, y + 0.5f, z + 0.5f);
             if (math.lengthsq(voxelCenter - LocalPosVox) <= SqrRadiusVox)
@@ -237,9 +229,7 @@ public class VoxelChunk : IVoxelData
     {
         var job = new ApplyCrackJob
         {
-            Width = Width,
-            Height = Height,
-            Depth = Depth,
+            VoxelsPerChunk = this.VoxelsPerChunk,
 
             Stability = stability,
             MaxStability = maxStability,
@@ -252,13 +242,9 @@ public class VoxelChunk : IVoxelData
             OreIndex = oreIndexArray,
             CrackColors = crackColorArray,
 
-            FaceXPlus = Padding.FaceXPlus.Current,
-            FaceYPlus = Padding.FaceYPlus.Current,
-            FaceZPlus = Padding.FaceZPlus.Current,
-
-            FaceXMinus = Padding.FaceXMinus.Current,
-            FaceYMinus = Padding.FaceYMinus.Current,
-            FaceZMinus = Padding.FaceZMinus.Current,
+            PaddedDensity = Padding.PaddedDensity,
+            PaddingSize = Padding.PaddingSize,
+            PaddedSize = Padding.PaddedSize,
 
             CenterVox = center / VoxelSize,
             HitDirVox = math.normalize(hitPoint / VoxelSize - center / VoxelSize),
@@ -273,9 +259,7 @@ public class VoxelChunk : IVoxelData
     [BurstCompile]
     public struct ApplyCrackJob : IJobParallelFor
     {
-        [ReadOnly] public int Width;
-        [ReadOnly] public int Height;
-        [ReadOnly] public int Depth;
+        [ReadOnly] public int VoxelsPerChunk;
 
         [ReadOnly] public int OreTypeIndex;
         [ReadOnly] public float Angle;
@@ -288,13 +272,9 @@ public class VoxelChunk : IVoxelData
         [ReadOnly] public NativeArray<int> OreIndex;
         [NativeDisableParallelForRestriction] public NativeArray<Color32> CrackColors;
 
-        [ReadOnly] public NativeArray<float> FaceXPlus;
-        [ReadOnly] public NativeArray<float> FaceYPlus;
-        [ReadOnly] public NativeArray<float> FaceZPlus;
-
-        [ReadOnly] public NativeArray<float> FaceXMinus;
-        [ReadOnly] public NativeArray<float> FaceYMinus;
-        [ReadOnly] public NativeArray<float> FaceZMinus;
+        [ReadOnly] public NativeArray<float> PaddedDensity;
+        [ReadOnly] public int PaddingSize;
+        [ReadOnly] public int PaddedSize;
 
         [ReadOnly] public float3 CenterVox;
         [ReadOnly] public float3 HitDirVox;
@@ -304,10 +284,10 @@ public class VoxelChunk : IVoxelData
             if (Data[index] < 0.5f) return;
             if (OreIndex[index] != OreTypeIndex) return;
 
-            int z = index / (Width * Height);
-            int rem = index - z * Width * Height;
-            int y = rem / Width;
-            int x = rem % Width;
+            int z = index / (VoxelsPerChunk * VoxelsPerChunk);
+            int rem = index - z * VoxelsPerChunk * VoxelsPerChunk;
+            int y = rem / VoxelsPerChunk;
+            int x = rem % VoxelsPerChunk;
 
             float3 voxelPos = new(x + 0.5f, y + 0.5f, z + 0.5f);
             float3 toVoxel = math.normalize(voxelPos - CenterVox);
@@ -344,29 +324,16 @@ public class VoxelChunk : IVoxelData
 
         public float GetVoxelValue(int x, int y, int z)
         {
-            if (x >= 0 && x < Width &&
-                y >= 0 && y < Height &&
-                z >= 0 && z < Depth)
-            {
-                return Data[x + y * Width + z * Width * Height];
-            }
+            int paddedX = x + PaddingSize;
+            int paddedY = y + PaddingSize;
+            int paddedZ = z + PaddingSize;
 
-            if (x == Width && y >= 0 && y < Height && z >= 0 && z < Depth)
-                return FaceXPlus[y + z * Height];
-            if (x == -1 && y >= 0 && y < Height && z >= 0 && z < Depth)
-                return FaceXMinus[y + z * Height];
+            if (paddedX < 0 || paddedX >= PaddedSize ||
+                paddedY < 0 || paddedY >= PaddedSize ||
+                paddedZ < 0 || paddedZ >= PaddedSize)
+                return 0f;
 
-            if (y == Height && x >= 0 && x < Width && z >= 0 && z < Depth)
-                return FaceYPlus[x + z * Width];
-            if (y == -1 && x >= 0 && x < Width && z >= 0 && z < Depth)
-                return FaceYMinus[x + z * Width];
-
-            if (z == Depth && x >= 0 && x < Width && y >= 0 && y < Height)
-                return FaceZPlus[x + y * Width];
-            if (z == -1 && x >= 0 && x < Width && y >= 0 && y < Height)
-                return FaceZMinus[x + y * Width];
-
-            return 0f;
+            return PaddedDensity[paddedX + paddedY * PaddedSize + paddedZ * PaddedSize * PaddedSize];
         }
     }
 
@@ -374,9 +341,7 @@ public class VoxelChunk : IVoxelData
     {
         var job = new DestroyOreShellLayerJob
         {
-            Width = Width,
-            Height = Height,
-            Depth = Depth,
+            VoxelsPerChunk = this.VoxelsPerChunk,
 
             OreTypeIndex = oreTypeIndex,
             Angle = Mathf.Cos(_alpha * Mathf.Deg2Rad),
@@ -397,9 +362,7 @@ public class VoxelChunk : IVoxelData
     [BurstCompile]
     public struct DestroyOreShellLayerJob : IJobParallelFor
     {
-        [ReadOnly] public int Width;
-        [ReadOnly] public int Height;
-        [ReadOnly] public int Depth;
+        [ReadOnly] public int VoxelsPerChunk;
 
         [ReadOnly] public int OreTypeIndex;
         [ReadOnly] public float Angle;
@@ -416,10 +379,10 @@ public class VoxelChunk : IVoxelData
             if (Data[index] < 0.5f) return;
             if (OreIndex[index] != OreTypeIndex) return;
 
-            int z = index / (Width * Height);
-            int rem = index - z * Width * Height;
-            int y = rem / Width;
-            int x = rem % Width;
+            int z = index / (VoxelsPerChunk * VoxelsPerChunk);
+            int rem = index - z * VoxelsPerChunk * VoxelsPerChunk;
+            int y = rem / VoxelsPerChunk;
+            int x = rem % VoxelsPerChunk;
 
             float3 voxelPos = new(x + 0.5f, y + 0.5f, z + 0.5f);
             float3 toVoxel = math.normalize(voxelPos - CenterVox);
@@ -463,50 +426,17 @@ public class VoxelChunk : IVoxelData
 
     public void ApplyWorldBoundaries(bool left, bool right, bool bottom, bool top, bool back, bool front)
     {
-        if (left) for (int y = 0; y < Height; y++) for (int z = 0; z < Depth; z++) this[0, y, z] = 0f;
-        if (right) for (int y = 0; y < Height; y++) for (int z = 0; z < Depth; z++) this[Width - 1, y, z] = 0f;
-        if (bottom) for (int x = 0; x < Width; x++) for (int z = 0; z < Depth; z++) this[x, 0, z] = 0f;
-        if (top) for (int x = 0; x < Width; x++) for (int z = 0; z < Depth; z++) this[x, Height - 1, z] = 0f;
-        if (back) for (int x = 0; x < Width; x++) for (int y = 0; y < Height; y++) this[x, y, 0] = 0f;
-        if (front) for (int x = 0; x < Width; x++) for (int y = 0; y < Height; y++) this[x, y, Depth - 1] = 0f;
+        if (left) for (int y = 0; y < VoxelsPerChunk; y++) for (int z = 0; z < VoxelsPerChunk; z++) this[0, y, z] = 0f;
+        if (right) for (int y = 0; y < VoxelsPerChunk; y++) for (int z = 0; z < VoxelsPerChunk; z++) this[VoxelsPerChunk - 1, y, z] = 0f;
+        if (bottom) for (int x = 0; x < VoxelsPerChunk; x++) for (int z = 0; z < VoxelsPerChunk; z++) this[x, 0, z] = 0f;
+        if (top) for (int x = 0; x < VoxelsPerChunk; x++) for (int z = 0; z < VoxelsPerChunk; z++) this[x, VoxelsPerChunk - 1, z] = 0f;
+        if (back) for (int x = 0; x < VoxelsPerChunk; x++) for (int y = 0; y < VoxelsPerChunk; y++) this[x, y, 0] = 0f;
+        if (front) for (int x = 0; x < VoxelsPerChunk; x++) for (int y = 0; y < VoxelsPerChunk; y++) this[x, y, VoxelsPerChunk - 1] = 0f;
     }
 
     public float GetVoxelValue(int x, int y, int z)
     {
-        if (x >= 0 && x < Width &&
-            y >= 0 && y < Height &&
-            z >= 0 && z < Depth)
-        {
-            return this[x, y, z];
-        }
-
-        if (x == Width && y >= 0 && y < Height && z >= 0 && z < Depth)
-            return Padding.FaceXPlus.Get(y, z);
-        if (x == -1 && y >= 0 && y < Height && z >= 0 && z < Depth)
-            return Padding.FaceXMinus.Get(y, z);
-
-        if (y == Height && x >= 0 && x < Width && z >= 0 && z < Depth)
-            return Padding.FaceYPlus.Get(x, z);
-        if (y == -1 && x >= 0 && x < Width && z >= 0 && z < Depth)
-            return Padding.FaceYMinus.Get(x, z);
-
-        if (z == Depth && x >= 0 && x < Width && y >= 0 && y < Height)
-            return Padding.FaceZPlus.Get(x, y);
-        if (z == -1 && x >= 0 && x < Width && y >= 0 && y < Height)
-            return Padding.FaceZMinus.Get(x, y);
-
-
-        if (x == Width && y == Height && z >= 0 && z < Depth)
-            return Padding.EdgeXPlusYPlus.Get(z, 0);
-        if (x == Width && z == Depth && y >= 0 && y < Height)
-            return Padding.EdgeXPlusZPlus.Get(y, 0);
-        if (y == Height && z == Depth && x >= 0 && x < Width)
-            return Padding.EdgeYPlusZPlus.Get(x, 0);
-
-        if (x == Width && y == Height && z == Depth)
-            return Padding.CornerXPlusYPlusZPlus.Get(0, 0);
-
-        return 0f;
+        return Padding.GetVoxelValue(x, y, z);
     }
 
     public void Dispose()
@@ -520,3 +450,14 @@ public class VoxelChunk : IVoxelData
         Padding.DisposeAll();
     }
 }
+
+
+
+
+
+
+
+
+
+
+

@@ -8,7 +8,6 @@ public class GameInstaller : MonoInstaller
     [SerializeField] private LookAtTargetDetector _lookAtTargetDetector;
     [SerializeField] private PlayerAndToolBaseStatsSO _playerAndToolBaseStatsSO;
     [SerializeField] private UpgradeSO _upgradeSO;
-    [SerializeField] private MeshShow _meshShow;
 
     public override void InstallBindings()
     {
@@ -42,6 +41,5 @@ public class GameInstaller : MonoInstaller
         Container.Bind<InputService>().FromInstance(inputService).AsSingle();
         inputService.SwitchToGameplay(); //Temporary
 
-        Container.Bind<MeshShow>().FromInstance(_meshShow).AsSingle();
     }
 }

@@ -21,7 +21,6 @@ public class OreMineable : MonoBehaviour, IMinable, IPickable
 
     public Vector3 Center => _center;
 
-    [Inject] private readonly MeshShow _meshShow;
 
     [SerializeField] private float _maxStability = 100f;
     [SerializeField] private float _maxDurability = 100f;
@@ -103,3 +102,4 @@ public class OreMineable : MonoBehaviour, IMinable, IPickable
         }
     }
 }
+

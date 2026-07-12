@@ -1,16 +1,23 @@
 using System.Collections.Generic;
-using System.Linq;
 using Unity.Collections;
+using Unity.Profiling;
 using UnityEngine;
 
 public class VoxelChunkManager : MonoBehaviour
 {
+    private static readonly Unity.Profiling.ProfilerMarker ApplyDamageMarker = new("Voxel.Manager.ApplyDamage");
+    private static readonly Unity.Profiling.ProfilerMarker GetAffectedChunksMarker = new("Voxel.Manager.GetAffectedChunks");
+    private static readonly Unity.Profiling.ProfilerMarker ChunkDamageJobsMarker = new("Voxel.Manager.ChunkDamageJobs");
+    private static readonly Unity.Profiling.ProfilerMarker OreDamageMarker = new("Voxel.Manager.OreDamage");
+    private static readonly Unity.Profiling.ProfilerMarker GetUpdateChunksMarker = new("Voxel.Manager.GetUpdateChunks");
+    private static readonly Unity.Profiling.ProfilerMarker PaddingUpdateMarker = new("Voxel.Manager.PaddingUpdate");
+    private static readonly Unity.Profiling.ProfilerMarker PaddingSwapMarker = new("Voxel.Manager.PaddingSwap");
+    private static readonly Unity.Profiling.ProfilerMarker UpdateChunksMarker = new("Voxel.Manager.UpdateChunks");
+    private static readonly Unity.Profiling.ProfilerMarker FillPaddedDensityMarker = new("Voxel.Manager.FillPaddedDensity");
     [SerializeField] private int _chunkCountX = 8;
     [SerializeField] private int _chunkCountY = 8;
     [SerializeField] private int _chunkCountZ = 8;
-    [SerializeField] private int _voxelsPerChunkX = 8;
-    [SerializeField] private int _voxelsPerChunkY = 8;
-    [SerializeField] private int _voxelsPerChunkZ = 8;
+    [SerializeField, Min(2)] private int _voxelsPerChunk = 8;
     [SerializeField] private float _voxelSize = 0.5f;
     [SerializeField] private float _maxStability = 0f;
     [SerializeField] private float _maxDurability = 40f;
@@ -26,92 +33,113 @@ public class VoxelChunkManager : MonoBehaviour
     private readonly Dictionary<int, OreMineable> _oreInstances = new();
     private void Awake()
     {
-        _chunkWorldSize = new Vector3(_voxelsPerChunkX, _voxelsPerChunkY, _voxelsPerChunkZ) * _voxelSize;
+        _chunkWorldSize = Vector3.one * _voxelsPerChunk * _voxelSize;
         CreateChunks();
     }
 
 
     public void ApplyDamage(Vector3 worldPosition, float radius, float stabilityDamage, float durabilityDamage)
     {
-        HashSet<Vector3Int> affectedChunks = GetAffectedChunks(worldPosition, radius);
+        using Unity.Profiling.ProfilerMarker.AutoScope _ = ApplyDamageMarker.Auto();
+
+        HashSet<Vector3Int> affectedChunks;
+        using (GetAffectedChunksMarker.Auto())
+        {
+            affectedChunks = GetAffectedChunks(worldPosition, radius);
+        }
+
         HashSet<Vector3Int> affectedOreChunks = new();
         HashSet<int> oreUniqueIndexes = new();
         Dictionary<Vector3Int, NativeArray<Color32>> indexToColor = new();
-        foreach (Vector3Int chunkPos in affectedChunks)
-        {
-            if (_chunkDict.TryGetValue(chunkPos, out VoxelChunk chunk))
-            {
-                int[] oreIndexes = chunk.ApplyDamage(
-                    WorldPosToLocalChunkPos(worldPosition, chunkPos),
-                    radius, stabilityDamage, durabilityDamage);
 
-                foreach (int index in oreIndexes)
-                    oreUniqueIndexes.Add(index);
-            }
-        }
-        foreach (int oreIndex in oreUniqueIndexes)
+        using (ChunkDamageJobsMarker.Auto())
         {
-            OreDamageResult oreDamageResult = _oreInstances[oreIndex].ApplyDamage(stabilityDamage, durabilityDamage);
-
-            foreach (Vector3Int chunkIndex in _oreToChunkList[oreIndex])
+            foreach (Vector3Int chunkPos in affectedChunks)
             {
-                switch (oreDamageResult)
+                if (_chunkDict.TryGetValue(chunkPos, out VoxelChunk chunk))
                 {
-                    case OreDamageResult.None:
-                        break;
+                    int[] oreIndexes = chunk.ApplyDamage(
+                        WorldPosToLocalChunkPos(worldPosition, chunkPos),
+                        radius, stabilityDamage, durabilityDamage);
 
-                    case OreDamageResult.CrackChanged:
-                        indexToColor[chunkIndex] =
-                        _chunkDict[chunkIndex].ApplyCrack(
-                            WorldPosToLocalChunkPos(worldPosition, chunkIndex),
-                            WorldPosToLocalChunkPos(_oreInstances[oreIndex].Center, chunkIndex),
-                            _oreInstances[oreIndex].Stability,
-                            _oreInstances[oreIndex].MaxStability,
-                            oreIndex);
-                        affectedOreChunks.Add(chunkIndex);
-                        break;
-
-                    case OreDamageResult.LayerDestroyed:
-
-                        _chunkDict[chunkIndex].DestroyOreShellLayer(
-                            WorldPosToLocalChunkPos(worldPosition, chunkIndex),
-                            WorldPosToLocalChunkPos(_oreInstances[oreIndex].Center, chunkIndex),
-                            oreIndex);
-                        affectedOreChunks.Add(chunkIndex);
-
-                        break;
-
-                    case OreDamageResult.FullyMined:
-                        _chunkDict[chunkIndex].DestroyAllOreVoxels(oreIndex);
-                        affectedOreChunks.Add(chunkIndex);
-
-                        break;
+                    foreach (int index in oreIndexes)
+                        oreUniqueIndexes.Add(index);
                 }
             }
         }
+
+        using (OreDamageMarker.Auto())
+        {
+            foreach (int oreIndex in oreUniqueIndexes)
+            {
+                OreDamageResult oreDamageResult = _oreInstances[oreIndex].ApplyDamage(stabilityDamage, durabilityDamage);
+
+                foreach (Vector3Int chunkIndex in _oreToChunkList[oreIndex])
+                {
+                    switch (oreDamageResult)
+                    {
+                        case OreDamageResult.None:
+                            break;
+
+                        case OreDamageResult.CrackChanged:
+                            indexToColor[chunkIndex] =
+                            _chunkDict[chunkIndex].ApplyCrack(
+                                WorldPosToLocalChunkPos(worldPosition, chunkIndex),
+                                WorldPosToLocalChunkPos(_oreInstances[oreIndex].Center, chunkIndex),
+                                _oreInstances[oreIndex].Stability,
+                                _oreInstances[oreIndex].MaxStability,
+                                oreIndex);
+                            affectedOreChunks.Add(chunkIndex);
+                            break;
+
+                        case OreDamageResult.LayerDestroyed:
+                            _chunkDict[chunkIndex].DestroyOreShellLayer(
+                                WorldPosToLocalChunkPos(worldPosition, chunkIndex),
+                                WorldPosToLocalChunkPos(_oreInstances[oreIndex].Center, chunkIndex),
+                                oreIndex);
+                            affectedOreChunks.Add(chunkIndex);
+                            break;
+
+                        case OreDamageResult.FullyMined:
+                            _chunkDict[chunkIndex].DestroyAllOreVoxels(oreIndex);
+                            affectedOreChunks.Add(chunkIndex);
+                            break;
+                    }
+                }
+            }
+        }
+
         affectedChunks.UnionWith(affectedOreChunks);
-        foreach (var affectedChunk in affectedChunks)
+
+        HashSet<Vector3Int> chunksToUpdate;
+        using (GetUpdateChunksMarker.Auto())
         {
-            ChunkNeighborsPaddingSet(affectedChunk);
+            chunksToUpdate = GetAffectedChunksWithNeighbors(affectedChunks);
         }
 
-        for (int x = 0; x < _chunkCountX; x++)
-            for (int y = 0; y < _chunkCountY; y++)
-                for (int z = 0; z < _chunkCountZ; z++)
-                {
-                    if (_chunkDict.TryGetValue(new Vector3Int(x, y, z), out VoxelChunk chunk))
-                        chunk.Padding.SwapAll();
-                }
+        using (PaddingUpdateMarker.Auto())
+        {
+            foreach (var chunkToUpdate in chunksToUpdate)
+                ChunkNeighborsPaddingSet(chunkToUpdate);
+        }
 
-        UpdateChunks(GetAffectedChunksWithNeighbors(affectedChunks).ToArray(), indexToColor);
+        using (PaddingSwapMarker.Auto())
+        {
+            foreach (Vector3Int chunkToUpdate in chunksToUpdate)
+                _chunkDict[chunkToUpdate].Padding.SwapAll();
+        }
+
+        using (UpdateChunksMarker.Auto())
+        {
+            UpdateChunks(chunksToUpdate, indexToColor);
+        }
     }
-
     private Vector3 WorldPosToLocalChunkPos(Vector3 WorldPos, Vector3Int index)
     {
         return WorldPos - transform.position - Vector3.Scale((Vector3)index, _chunkWorldSize);
     }
 
-    private void UpdateChunks(Vector3Int[] indexes, Dictionary<Vector3Int, NativeArray<Color32>> indexToColor)
+    private void UpdateChunks(IEnumerable<Vector3Int> indexes, Dictionary<Vector3Int, NativeArray<Color32>> indexToColor)
     {
         foreach (Vector3Int index in indexes)
         {
@@ -186,7 +214,7 @@ public class VoxelChunkManager : MonoBehaviour
                     go.name = $"Chunk_{x}_{y}_{z}";
                     VoxelChunkRenderer chunkRenderer = go.GetComponent<VoxelChunkRenderer>();
 
-                    VoxelChunk chunkData = new(_voxelsPerChunkX, _voxelsPerChunkY, _voxelsPerChunkZ, _voxelSize, _maxStability, _maxDurability, _alpha);
+                    VoxelChunk chunkData = new(_voxelsPerChunk, _voxelSize, _maxStability, _maxDurability, _alpha);
                     chunkData.ApplyWorldBoundaries(
                         x == 0, x == _chunkCountX - 1,
                         y == 0, y == _chunkCountY - 1,
@@ -233,88 +261,73 @@ public class VoxelChunkManager : MonoBehaviour
 
     private void ChunkNeighborsPaddingSet(Vector3Int chunkID)
     {
-        if (!_chunkDict.TryGetValue(chunkID, out _))
+        if (!_chunkDict.ContainsKey(chunkID))
             return;
-        VoxelChunk chunk;
 
-        // Face
-        if (_chunkDict.TryGetValue(chunkID + new Vector3Int(1, 0, 0), out chunk))
-        {
-            for (int y = 0; y < _voxelsPerChunkY; y++)
-                for (int z = 0; z < _voxelsPerChunkZ; z++)
+        FillPaddedDensity(chunkID);
+    }
+
+    private void FillPaddedDensity(Vector3Int chunkID)
+    {
+        VoxelChunk targetChunk = _chunkDict[chunkID];
+        VoxelChunkPadding padding = targetChunk.Padding;
+        int paddingSize = padding.PaddingSize;
+
+        padding.ClearNext();
+
+        for (int offsetX = -1; offsetX <= 1; offsetX++)
+            for (int offsetY = -1; offsetY <= 1; offsetY++)
+                for (int offsetZ = -1; offsetZ <= 1; offsetZ++)
                 {
-                    chunk.Padding.FaceXMinus.Set(y, z, _chunkDict[chunkID][_voxelsPerChunkX - 1, y, z]);
+                    Vector3Int sourceChunkID = chunkID + new Vector3Int(offsetX, offsetY, offsetZ);
+                    if (!_chunkDict.TryGetValue(sourceChunkID, out VoxelChunk sourceChunk))
+                        continue;
+
+                    GetPaddingCopyRange(offsetX, paddingSize, out int sourceStartX, out int destinationStartX, out int sizeX);
+                    GetPaddingCopyRange(offsetY, paddingSize, out int sourceStartY, out int destinationStartY, out int sizeY);
+                    GetPaddingCopyRange(offsetZ, paddingSize, out int sourceStartZ, out int destinationStartZ, out int sizeZ);
+
+                    padding.CopyDensityBlockFrom(
+                        sourceChunk.Dencity,
+                        _voxelsPerChunk,
+                        sourceStartX,
+                        sourceStartY,
+                        sourceStartZ,
+                        destinationStartX,
+                        destinationStartY,
+                        destinationStartZ,
+                        sizeX,
+                        sizeY,
+                        sizeZ);
                 }
-        }
-        if (_chunkDict.TryGetValue(chunkID + new Vector3Int(-1, 0, 0), out chunk))
+    }
+
+    private void GetPaddingCopyRange(
+        int chunkOffset,
+        int paddingSize,
+        out int sourceStart,
+        out int destinationStart,
+        out int size)
+    {
+        if (chunkOffset < 0)
         {
-            for (int y = 0; y < _voxelsPerChunkY; y++)
-                for (int z = 0; z < _voxelsPerChunkZ; z++)
-                {
-                    chunk.Padding.FaceXPlus.Set(y, z, _chunkDict[chunkID][0, y, z]);
-                }
+            sourceStart = _voxelsPerChunk - paddingSize;
+            destinationStart = 0;
+            size = paddingSize;
+            return;
         }
 
-        if (_chunkDict.TryGetValue(chunkID + new Vector3Int(0, 1, 0), out chunk))
+        if (chunkOffset > 0)
         {
-            for (int x = 0; x < _voxelsPerChunkX; x++)
-                for (int z = 0; z < _voxelsPerChunkZ; z++)
-                {
-                    chunk.Padding.FaceYMinus.Set(x, z, _chunkDict[chunkID][x, _voxelsPerChunkY - 1, z]);
-                }
-        }
-        if (_chunkDict.TryGetValue(chunkID + new Vector3Int(0, -1, 0), out chunk))
-        {
-            for (int x = 0; x < _voxelsPerChunkX; x++)
-                for (int z = 0; z < _voxelsPerChunkZ; z++)
-                {
-                    chunk.Padding.FaceYPlus.Set(x, z, _chunkDict[chunkID][x, 0, z]);
-                }
+            sourceStart = 0;
+            destinationStart = paddingSize + _voxelsPerChunk;
+            size = paddingSize;
+            return;
         }
 
-        if (_chunkDict.TryGetValue(chunkID + new Vector3Int(0, 0, 1), out chunk))
-        {
-            for (int x = 0; x < _voxelsPerChunkX; x++)
-                for (int y = 0; y < _voxelsPerChunkY; y++)
-                {
-                    chunk.Padding.FaceZMinus.Set(x, y, _chunkDict[chunkID][x, y, _voxelsPerChunkZ - 1]);
-                }
-        }
-        if (_chunkDict.TryGetValue(chunkID + new Vector3Int(0, 0, -1), out chunk))
-        {
-            for (int x = 0; x < _voxelsPerChunkX; x++)
-                for (int y = 0; y < _voxelsPerChunkY; y++)
-                {
-                    chunk.Padding.FaceZPlus.Set(x, y, _chunkDict[chunkID][x, y, 0]);
-                }
-        }
-        // Edge
-        if (_chunkDict.TryGetValue(chunkID + new Vector3Int(-1, -1, 0), out chunk))
-        {
-            for (int z = 0; z < _voxelsPerChunkZ; z++)
-            {
-                chunk.Padding.EdgeXPlusYPlus.Set(z, 0, _chunkDict[chunkID][0, 0, z]);
-            }
-        }
-        if (_chunkDict.TryGetValue(chunkID + new Vector3Int(-1, 0, -1), out chunk))
-        {
-            for (int y = 0; y < _voxelsPerChunkY; y++)
-            {
-                chunk.Padding.EdgeXPlusZPlus.Set(y, 0, _chunkDict[chunkID][0, y, 0]);
-            }
-        }
-        if (_chunkDict.TryGetValue(chunkID + new Vector3Int(0, -1, -1), out chunk))
-        {
-            for (int x = 0; x < _voxelsPerChunkX; x++)
-            {
-                chunk.Padding.EdgeYPlusZPlus.Set(x, 0, _chunkDict[chunkID][x, 0, 0]);
-            }
-        }
-        // Corner
-        if (_chunkDict.TryGetValue(chunkID + new Vector3Int(-1, -1, -1), out chunk))
-        {
-            chunk.Padding.CornerXPlusYPlusZPlus.Set(0, 0, _chunkDict[chunkID][0, 0, 0]);
-        }
+        sourceStart = 0;
+        destinationStart = paddingSize;
+        size = _voxelsPerChunk;
     }
 
     private void OnDestroy()
@@ -330,34 +343,43 @@ public class VoxelChunkManager : MonoBehaviour
 
     private HashSet<Vector3Int> GetAffectedChunksWithNeighbors(HashSet<Vector3Int> affectedChunks)
     {
-
         HashSet<Vector3Int> result = new(affectedChunks);
-
-
-        void AddChunkIfExists(HashSet<Vector3Int> chunks, Vector3Int chunkID)
-        {
-            if (_chunkDict.ContainsKey(chunkID))
-                chunks.Add(chunkID);
-        }
 
         foreach (Vector3Int chunkID in affectedChunks)
         {
-            AddChunkIfExists(result, chunkID + new Vector3Int(1, 0, 0));
-            AddChunkIfExists(result, chunkID + new Vector3Int(-1, 0, 0));
+            for (int x = -1; x <= 1; x++)
+                for (int y = -1; y <= 1; y++)
+                    for (int z = -1; z <= 1; z++)
+                    {
+                        if (x == 0 && y == 0 && z == 0)
+                            continue;
 
-            AddChunkIfExists(result, chunkID + new Vector3Int(0, 1, 0));
-            AddChunkIfExists(result, chunkID + new Vector3Int(0, -1, 0));
-
-            AddChunkIfExists(result, chunkID + new Vector3Int(0, 0, 1));
-            AddChunkIfExists(result, chunkID + new Vector3Int(0, 0, -1));
-
-            AddChunkIfExists(result, chunkID + new Vector3Int(-1, -1, 0));
-            AddChunkIfExists(result, chunkID + new Vector3Int(-1, 0, -1));
-            AddChunkIfExists(result, chunkID + new Vector3Int(0, -1, -1));
-
-            AddChunkIfExists(result, chunkID + new Vector3Int(-1, -1, -1));
+                        TryAddChunk(result, chunkID + new Vector3Int(x, y, z));
+                    }
         }
 
         return result;
     }
+
+    private void TryAddChunk(HashSet<Vector3Int> chunks, Vector3Int chunkID)
+    {
+        if (_chunkDict.ContainsKey(chunkID))
+            chunks.Add(chunkID);
+    }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

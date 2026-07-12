@@ -4,13 +4,18 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
+
 public class MarchingCubesChunkMeshGenerator
 {
-    private const float AirDensity = 0f;
+    private static readonly Unity.Profiling.ProfilerMarker GenerateMeshMarker = new("Voxel.Mesh.GenerateMesh");
+    private static readonly Unity.Profiling.ProfilerMarker ClearBuffersMarker = new("Voxel.Mesh.ClearBuffers");
+    private static readonly Unity.Profiling.ProfilerMarker MarchCubeCompleteMarker = new("Voxel.Mesh.MarchCubeJobComplete");
+    private static readonly Unity.Profiling.ProfilerMarker CompactMeshMarker = new("Voxel.Mesh.CompactMeshData");
+    private static readonly Unity.Profiling.ProfilerMarker UploadMeshMarker = new("Voxel.Mesh.UploadMeshData");
     private const float IsoLevel = 0.5f;
 
     private readonly int _maxVertices;
-    private readonly int _chunkSize;
+    private readonly int _voxelCount;
     private readonly int _jobCount;
     private NativeArray<float3> vertices;
     private NativeArray<ushort> triangles;
@@ -23,51 +28,44 @@ public class MarchingCubesChunkMeshGenerator
     private NativeArray<int> hasSurface;
 
     private Mesh mesh;
-    public MarchingCubesChunkMeshGenerator(int width, int height, int depth, int jobCount)
+
+    public MarchingCubesChunkMeshGenerator(int voxelsPerChunk, int jobCount)
     {
-        _maxVertices = 15 * width * height * depth;
-        _chunkSize = width * height * depth;
+        _maxVertices = 15 * voxelsPerChunk * voxelsPerChunk * voxelsPerChunk;
+        _voxelCount = voxelsPerChunk * voxelsPerChunk * voxelsPerChunk;
         _jobCount = jobCount;
         vertices = new NativeArray<float3>(_maxVertices, Allocator.Persistent);
         triangles = new NativeArray<ushort>(_maxVertices, Allocator.Persistent);
         normals = new NativeArray<float3>(_maxVertices, Allocator.Persistent);
 
-        cubeValues = new NativeArray<float>(8 * _chunkSize, Allocator.Persistent);
-        cubePositions = new NativeArray<float3>(8 * _chunkSize, Allocator.Persistent);
-        edgeVertices = new NativeArray<float3>(12 * _chunkSize, Allocator.Persistent);
+        cubeValues = new NativeArray<float>(8 * _voxelCount, Allocator.Persistent);
+        cubePositions = new NativeArray<float3>(8 * _voxelCount, Allocator.Persistent);
+        edgeVertices = new NativeArray<float3>(12 * _voxelCount, Allocator.Persistent);
 
         hasSurface = new NativeArray<int>(1, Allocator.Persistent);
     }
 
     public Mesh GenerateMesh(VoxelChunk chunk)
     {
+        using Unity.Profiling.ProfilerMarker.AutoScope _ = GenerateMeshMarker.Auto();
+
         hasSurface[0] = 0;
 
-        for (int i = 0; i < vertices.Length; i++)
+        using (ClearBuffersMarker.Auto())
         {
-            vertices[i] = float3.zero;
-            normals[i] = float3.zero;
-            triangles[i] = 0;
+            vertices.FillArray(float3.zero);
+            normals.FillArray(float3.zero);
+            triangles.FillArray(default);
         }
 
         var job = new MarchCubeJob
         {
-            Width = chunk.Width,
-            Height = chunk.Height,
-            Depth = chunk.Depth,
+            VoxelsPerChunk = chunk.VoxelsPerChunk,
             VoxelSize = chunk.VoxelSize,
 
-            Dencity = chunk.Dencity,
-            FaceXPlus =chunk.Padding.FaceXPlus.Current,
-            FaceYPlus = chunk.Padding.FaceYPlus.Current,
-            FaceZPlus = chunk.Padding.FaceZPlus.Current,
-            FaceXMinus = chunk.Padding.FaceXMinus.Current,
-            FaceYMinus = chunk.Padding.FaceYMinus.Current,
-            FaceZMinus = chunk.Padding.FaceZMinus.Current,
-            EdgeXPlusYPlus = chunk.Padding.EdgeXPlusYPlus.Current,
-            EdgeXPlusZPlus = chunk.Padding.EdgeXPlusZPlus.Current,
-            EdgeYPlusZPlus = chunk.Padding.EdgeYPlusZPlus.Current,
-            CornerXPlusYPlusZPlus = chunk.Padding.CornerXPlusYPlusZPlus.Current,
+            PaddedDensity = chunk.Padding.PaddedDensity,
+            PaddingSize = chunk.Padding.PaddingSize,
+            PaddedSize = chunk.Padding.PaddedSize,
 
             Vertices = vertices,
             Triangles = triangles,
@@ -79,107 +77,86 @@ public class MarchingCubesChunkMeshGenerator
 
             HasSurface = hasSurface,
         };
-        //for (int i = 0; i < _chunkSize; i++)
-        //{
-        //    job.Execute(i);
-        //}
 
-        JobHandle handle = job.Schedule(_chunkSize, _jobCount);
-        handle.Complete();
+        JobHandle handle = job.Schedule(_voxelCount, _jobCount);
+        using (MarchCubeCompleteMarker.Auto())
+        {
+            handle.Complete();
+        }
 
         if (hasSurface[0] == 0)
             return null;
 
         int writeIndex = 0;
 
-        for (int i = 0; i < _maxVertices; i += 3)
+        using (CompactMeshMarker.Auto())
         {
-            float3 v0 = vertices[i];
-            float3 v1 = vertices[i + 1];
-            float3 v2 = vertices[i + 2];
+            for (int i = 0; i < _maxVertices; i += 3)
+            {
+                float3 v0 = vertices[i];
+                float3 v1 = vertices[i + 1];
+                float3 v2 = vertices[i + 2];
 
-            if (v0.Equals(float3.zero) &&
-                v1.Equals(float3.zero) &&
-                v2.Equals(float3.zero))
-                continue;
+                if (v0.Equals(float3.zero) &&
+                    v1.Equals(float3.zero) &&
+                    v2.Equals(float3.zero))
+                    continue;
 
-            vertices[writeIndex] = v0;
-            vertices[writeIndex + 1] = v1;
-            vertices[writeIndex + 2] = v2;
+                vertices[writeIndex] = v0;
+                vertices[writeIndex + 1] = v1;
+                vertices[writeIndex + 2] = v2;
 
-            triangles[writeIndex] = (ushort)writeIndex;
-            triangles[writeIndex + 1] = (ushort)(writeIndex + 1);
-            triangles[writeIndex + 2] = (ushort)(writeIndex + 2);
+                triangles[writeIndex] = (ushort)writeIndex;
+                triangles[writeIndex + 1] = (ushort)(writeIndex + 1);
+                triangles[writeIndex + 2] = (ushort)(writeIndex + 2);
 
-            normals[writeIndex] = normals[i];
-            normals[writeIndex + 1] = normals[i + 1];
-            normals[writeIndex + 2] = normals[i + 2];
+                normals[writeIndex] = normals[i];
+                normals[writeIndex + 1] = normals[i + 1];
+                normals[writeIndex + 2] = normals[i + 2];
 
-
-            writeIndex += 3;
+                writeIndex += 3;
+            }
         }
 
-        mesh = new();
+        using (UploadMeshMarker.Auto())
+        {
+            mesh = new Mesh();
 
-        mesh.SetVertexBufferParams(
-            writeIndex,
-            new VertexAttributeDescriptor(
-                VertexAttribute.Position,
-                VertexAttributeFormat.Float32,
-                3
-            )
-        );
+            mesh.SetVertexBufferParams(
+                writeIndex,
+                new VertexAttributeDescriptor(
+                    VertexAttribute.Position,
+                    VertexAttributeFormat.Float32,
+                    3
+                )
+            );
 
-        mesh.SetIndexBufferParams(
-            writeIndex,
-            mesh.indexFormat
-        );
+            mesh.SetIndexBufferParams(
+                writeIndex,
+                mesh.indexFormat
+            );
 
+            mesh.SetVertexBufferData(vertices, 0, 0, writeIndex, 0, MeshUpdateFlags.DontValidateIndices);
+            mesh.SetIndexBufferData(triangles, 0, 0, writeIndex, MeshUpdateFlags.DontValidateIndices);
+            mesh.SetSubMesh(0, new SubMeshDescriptor(0, writeIndex, MeshTopology.Triangles), MeshUpdateFlags.DontValidateIndices);
+            mesh.SetNormals(normals, 0, writeIndex);
 
-        mesh.SetVertexBufferData(vertices, 0, 0, writeIndex, 0, MeshUpdateFlags.DontValidateIndices);
-        mesh.SetIndexBufferData(triangles, 0, 0, writeIndex, MeshUpdateFlags.DontValidateIndices);
-        mesh.SetSubMesh(0, new SubMeshDescriptor(0, writeIndex, MeshTopology.Triangles), MeshUpdateFlags.DontValidateIndices);
-        //mesh.SetNormals(normals, 0, writeIndex);
-        mesh.RecalculateNormals();
-        mesh.bounds = new Bounds(
-            new Vector3(
-                chunk.Width * chunk.VoxelSize * 0.5f,
-                chunk.Height * chunk.VoxelSize * 0.5f,
-                chunk.Depth * chunk.VoxelSize * 0.5f
-            ),
-            new Vector3(
-                chunk.Width * chunk.VoxelSize,
-                chunk.Height * chunk.VoxelSize,
-                chunk.Depth * chunk.VoxelSize
-            )
-        );
+            Vector3 center = Vector3.one * chunk.VoxelsPerChunk * chunk.VoxelSize * 0.5f;
+            Vector3 boundsSize = Vector3.one * chunk.VoxelsPerChunk * chunk.VoxelSize;
+            mesh.bounds = new Bounds(center, boundsSize);
+        }
 
         return mesh;
     }
-
     [BurstCompile]
     public struct MarchCubeJob : IJobParallelFor
     {
-        [ReadOnly] public int Width;
-        [ReadOnly] public int Height;
-        [ReadOnly] public int Depth;
+        [ReadOnly] public int VoxelsPerChunk;
         [ReadOnly] public float VoxelSize;
 
-        [ReadOnly] public NativeArray<float> Dencity;
-
-        [ReadOnly] public NativeArray<float> FaceXPlus;
-        [ReadOnly] public NativeArray<float> FaceYPlus;
-        [ReadOnly] public NativeArray<float> FaceZPlus;
-
-        [ReadOnly] public NativeArray<float> FaceXMinus;
-        [ReadOnly] public NativeArray<float> FaceYMinus;
-        [ReadOnly] public NativeArray<float> FaceZMinus;
-
-        [ReadOnly] public NativeArray<float> EdgeXPlusYPlus;
-        [ReadOnly] public NativeArray<float> EdgeXPlusZPlus;
-        [ReadOnly] public NativeArray<float> EdgeYPlusZPlus;
-
-        [ReadOnly] public NativeArray<float> CornerXPlusYPlusZPlus;
+        [ReadOnly] public NativeArray<float> PaddedDensity;
+        [ReadOnly] public int PaddingSize;
+        [ReadOnly] public int PaddedSize;
 
         [NativeDisableParallelForRestriction] public NativeArray<float3> Vertices;
         [NativeDisableParallelForRestriction] public NativeArray<ushort> Triangles;
@@ -191,18 +168,16 @@ public class MarchingCubesChunkMeshGenerator
 
         [NativeDisableParallelForRestriction] public NativeArray<int> HasSurface;
 
-
         public void Execute(int index)
         {
             int offset8 = index * 8;
             int offset12 = index * 12;
 
-            int z = index / (Width * Height);
-            int rem = index - z * Width * Height;
-            int y = rem / Width;
-            int x = rem % Width;
+            int z = index / (VoxelsPerChunk * VoxelsPerChunk);
+            int rem = index - z * VoxelsPerChunk * VoxelsPerChunk;
+            int y = rem / VoxelsPerChunk;
+            int x = rem % VoxelsPerChunk;
 
-            // Get all 8 vertices of cube
             for (int i = 0; i < 8; i++)
             {
                 int xi = x + MarchingTableBurst.VertexOffset[i * 3 + 0];
@@ -213,7 +188,6 @@ public class MarchingCubesChunkMeshGenerator
                 CubePositions[offset8 + i] = new float3(xi, yi, zi);
             }
 
-            // Find what how many Edges is cut, it just get from table
             int cubeIndex = 0;
             for (int i = 0; i < 8; i++)
             {
@@ -228,7 +202,6 @@ public class MarchingCubesChunkMeshGenerator
 
             HasSurface[0] = 1;
 
-            //  find place where is this points have
             for (int i = 0; i < 12; i++)
             {
                 if ((edges & (1 << i)) != 0)
@@ -242,7 +215,6 @@ public class MarchingCubesChunkMeshGenerator
                 }
             }
 
-            // add vertices, triangles, normals
             for (int i = 0; MarchingTableBurst.TriangleConnectionTable[cubeIndex * 16 + i] != -1; i += 3)
             {
                 int index0 = MarchingTableBurst.TriangleConnectionTable[cubeIndex * 16 + i];
@@ -277,7 +249,6 @@ public class MarchingCubesChunkMeshGenerator
 
         private Vector3 CalculateNormal(float3 pos)
         {
-
             float dx = SampleDensity(pos + new float3(1, 0, 0))
                      - SampleDensity(pos - new float3(1, 0, 0));
 
@@ -287,7 +258,11 @@ public class MarchingCubesChunkMeshGenerator
             float dz = SampleDensity(pos + new float3(0, 0, 1))
                      - SampleDensity(pos - new float3(0, 0, 1));
 
-            return -math.normalize(new float3(dx, dy, dz));
+            float3 normal = new float3(dx, dy, dz);
+            if (math.lengthsq(normal) < 0.000001f)
+                return Vector3.up;
+
+            return -math.normalize(normal);
         }
 
         private float SampleDensity(float3 pos)
@@ -298,44 +273,22 @@ public class MarchingCubesChunkMeshGenerator
 
             return GetVoxelValue(x, y, z);
         }
+
         public float GetVoxelValue(int x, int y, int z)
         {
-            if (x >= 0 && x < Width &&
-                y >= 0 && y < Height &&
-                z >= 0 && z < Depth)
-            {
-                return Dencity[x + y * Width + z * Width * Height];
-            }
+            int paddedX = x + PaddingSize;
+            int paddedY = y + PaddingSize;
+            int paddedZ = z + PaddingSize;
 
-            if (x == Width && y >= 0 && y < Height && z >= 0 && z < Depth)
-                return FaceXPlus[y + z * Height];
-            if (x == -1 && y >= 0 && y < Height && z >= 0 && z < Depth)
-                return FaceXMinus[y + z * Height];
+            if (paddedX < 0 || paddedX >= PaddedSize ||
+                paddedY < 0 || paddedY >= PaddedSize ||
+                paddedZ < 0 || paddedZ >= PaddedSize)
+                return 0f;
 
-            if (y == Height && x >= 0 && x < Width && z >= 0 && z < Depth)
-                return FaceYPlus[x + z * Width];
-            if (y == -1 && x >= 0 && x < Width && z >= 0 && z < Depth)
-                return FaceYMinus[x + z * Width];
-
-            if (z == Depth && x >= 0 && x < Width && y >= 0 && y < Height)
-                return FaceZPlus[x + y * Width];
-            if (z == -1 && x >= 0 && x < Width && y >= 0 && y < Height)
-                return FaceZMinus[x + y * Width];
-
-
-            if (x == Width && y == Height && z >= 0 && z < Depth)
-                return EdgeXPlusYPlus[z];
-            if (x == Width && z == Depth && y >= 0 && y < Height)
-                return EdgeXPlusZPlus[y];
-            if (y == Height && z == Depth && x >= 0 && x < Width)
-                return EdgeYPlusZPlus[x];
-
-            if (x == Width && y == Height && z == Depth)
-                return CornerXPlusYPlusZPlus[0];
-
-            return 0f;
+            return PaddedDensity[paddedX + paddedY * PaddedSize + paddedZ * PaddedSize * PaddedSize];
         }
     }
+
     public void Dispose()
     {
         if (vertices.IsCreated) vertices.Dispose();
@@ -348,5 +301,12 @@ public class MarchingCubesChunkMeshGenerator
 
         if (hasSurface.IsCreated) hasSurface.Dispose();
     }
-
 }
+
+
+
+
+
+
+
+
