@@ -22,7 +22,6 @@ public class CubMeshTest : MonoBehaviour
 
         _renderer = GetComponent<Renderer>();
         _renderer.materials[0].SetTexture("_TestTry3d", testTexture);
-        _renderer.materials[0].SetVector("_BoundsMin", _renderer.bounds.min);
-        _renderer.materials[0].SetVector("_BoundsMax", _renderer.bounds.max);
+        _renderer.materials[0].SetVector("_VoxelGridSize", Vector3.one * 16);
     }
 }

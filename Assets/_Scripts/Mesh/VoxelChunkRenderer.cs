@@ -106,7 +106,7 @@ public class VoxelChunkRenderer : MonoBehaviour, IVoxelDamageable
         _meshGenerator = new MarchingCubesChunkMeshGenerator(_voxelChunk.VoxelsPerChunk, MeshGenerationJobCount);
 
         _material.SetFloat("_VoxelSize", _voxelChunk.VoxelSize);
-        _material.SetVector("_BoundsMax", Vector3.one * _voxelChunk.VoxelsPerChunk);
+        _material.SetVector("_VoxelGridSize", Vector3.one * _voxelChunk.VoxelsPerChunk);
 
         _crackTex = new Texture3D(
             _voxelChunk.VoxelsPerChunk,
@@ -114,6 +114,7 @@ public class VoxelChunkRenderer : MonoBehaviour, IVoxelDamageable
             _voxelChunk.VoxelsPerChunk,
             TextureFormat.RGBA32,
             false);
+
         _crackColors = new Color[_voxelChunk.VoxelsPerChunk * _voxelChunk.VoxelsPerChunk * _voxelChunk.VoxelsPerChunk];
         _crackTex.SetPixels(_crackColors);
         _crackTex.Apply();
@@ -131,7 +132,7 @@ public class VoxelChunkRenderer : MonoBehaviour, IVoxelDamageable
         _crackTex.Apply(false);
         _material.SetTexture("_CrackTex", _crackTex);
         _material.SetFloat("_VoxelSize", voxelChunk.VoxelSize);
-        _material.SetVector("_BoundsMax", Vector3.one * voxelChunk.VoxelsPerChunk);
+        _material.SetVector("_VoxelGridSize", Vector3.one * voxelChunk.VoxelsPerChunk);
     }
 
     public void ApplyVoxelDamage(Vector3 worldPosition, float radius, float stabilityDamage, float durabilityDamage)
